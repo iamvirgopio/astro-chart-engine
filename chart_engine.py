@@ -429,13 +429,13 @@ def generate_reading(day_result, natal_positions, natal_houses=None):
     hits = day_result["hits"]
 
     if score >= 4:
-        verdict = "This one leans favorable."
+        verdict = "Make the most of today!"
     elif score >= 1:
-        verdict = "Mild lean toward yes, nothing dramatic either way."
+        verdict = "Easy day. Nothing dramatic."
     elif score > -1:
-        verdict = "Genuinely mixed -- no strong pull in either direction."
+        verdict = "Wash of a day -- take it or leave it."
     else:
-        verdict = "This one leans toward waiting."
+        verdict = "Pass on today."
 
     favorable_hits = [h for h in hits if h["aspect"] in FAVORABLE]
     tense_hits = [h for h in hits if h["aspect"] in TENSE]

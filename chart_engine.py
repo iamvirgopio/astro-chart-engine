@@ -665,6 +665,52 @@ def check_location_influence(lines, query_lat, query_lon, orb_degrees=6):
     return sorted(hits, key=lambda h: h["distance_deg"])
 
 
+def classify_open_question(question_text, valid_lenses, context_description, api_key=None):
+    """
+    General-purpose question classifier, reusing the same invisible-AI
+    routing pattern as classify_question_live -- just with a swappable
+    lens set and context description, so it can serve synastry questions,
+    location questions, or anything else that needs robust free-text
+    routing without hand-written keyword lists.
+    """
+    import os, json as jsonlib, re
+    key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+    if not key:
+        raise RuntimeError("No Anthropic API key configured")
+
+    system_prompt = (
+        f"You classify a person's question about {context_description} into exactly one "
+        f"of these categories: {', '.join(valid_lenses)}.\n"
+        f'Return ONLY valid JSON: {{"lens": "<one of the categories>", "confidence": 0.0-1.0}}\n'
+        f"No markdown, no explanation, just the JSON object."
+    )
+
+    import urllib.request
+    payload = jsonlib.dumps({
+        "model": "claude-haiku-4-5-20251001",
+        "max_tokens": 100,
+        "system": system_prompt,
+        "messages": [{"role": "user", "content": question_text}],
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages",
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "x-api-key": key,
+            "anthropic-version": "2023-06-01",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        body = jsonlib.loads(resp.read())
+    text = body["content"][0]["text"].strip()
+    text = re.sub(r"^```(json)?|```$", "", text.strip(), flags=re.MULTILINE).strip()
+    result = jsonlib.loads(text)
+    if result.get("lens") not in valid_lenses:
+        result["lens"] = "general" if "general" in valid_lenses else valid_lenses[0]
+    return result
+
+
 def _lon_diff(lon1, lon2):
     d = (lon1 - lon2) % 360
     return d - 360 if d > 180 else d

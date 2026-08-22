@@ -159,6 +159,27 @@ def get_synastry(req: SynastryRequest):
     return {"hits": hits}
 
 
+class ClassifyQuestionRequest(BaseModel):
+    question: str
+    valid_lenses: list[str]
+    context_description: str
+
+
+@app.post("/classify-question")
+def classify_question_endpoint(req: ClassifyQuestionRequest):
+    """General-purpose free-text classifier, reused for synastry and
+    location questions -- same invisible-AI routing already used for
+    the main reading flow, just with a swappable lens set."""
+    try:
+        result = ce.classify_open_question(
+            question_text=req.question, valid_lenses=req.valid_lenses,
+            context_description=req.context_description,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return result
+
+
 class RecommendLocationsRequest(BaseModel):
     julian_day_ut: float
     theme_planets: list[str]

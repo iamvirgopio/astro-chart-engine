@@ -670,6 +670,59 @@ def _lon_diff(lon1, lon2):
     return d - 360 if d > 180 else d
 
 
+# A real, if not exhaustive, set of major world cities for the location
+# recommendation feature -- (name, lat, lon). Growing this list is easy
+# (just more real coordinates); it's not meant to be every city on Earth,
+# just enough genuine geographic spread to give real recommendations.
+CANDIDATE_CITIES = [
+    ("New York, USA", 40.7128, -74.0060), ("Los Angeles, USA", 34.0522, -118.2437),
+    ("Chicago, USA", 41.8781, -87.6298), ("Miami, USA", 25.7617, -80.1918),
+    ("Austin, USA", 30.2672, -97.7431), ("Seattle, USA", 47.6062, -122.3321),
+    ("Denver, USA", 39.7392, -104.9903), ("Boston, USA", 42.3601, -71.0589),
+    ("San Francisco, USA", 37.7749, -122.4194), ("Toronto, Canada", 43.6532, -79.3832),
+    ("Vancouver, Canada", 49.2827, -123.1207), ("Mexico City, Mexico", 19.4326, -99.1332),
+    ("London, UK", 51.5074, -0.1278), ("Paris, France", 48.8566, 2.3522),
+    ("Berlin, Germany", 52.5200, 13.4050), ("Rome, Italy", 41.9028, 12.4964),
+    ("Madrid, Spain", 40.4168, -3.7038), ("Amsterdam, Netherlands", 52.3676, 4.9041),
+    ("Lisbon, Portugal", 38.7223, -9.1393), ("Dublin, Ireland", 53.3498, -6.2603),
+    ("Barcelona, Spain", 41.3874, 2.1686), ("Vienna, Austria", 48.2082, 16.3738),
+    ("Prague, Czechia", 50.0755, 14.4378), ("Copenhagen, Denmark", 55.6761, 12.5683),
+    ("Stockholm, Sweden", 59.3293, 18.0686), ("Athens, Greece", 37.9838, 23.7275),
+    ("Istanbul, Turkey", 41.0082, 28.9784), ("Dubai, UAE", 25.2048, 55.2708),
+    ("Tokyo, Japan", 35.6762, 139.6503), ("Seoul, South Korea", 37.5665, 126.9780),
+    ("Singapore", 1.3521, 103.8198), ("Bangkok, Thailand", 13.7563, 100.5018),
+    ("Hong Kong", 22.3193, 114.1694), ("Sydney, Australia", -33.8688, 151.2093),
+    ("Melbourne, Australia", -37.8136, 144.9631), ("Auckland, New Zealand", -36.8485, 174.7633),
+    ("Cape Town, South Africa", -33.9249, 18.4241), ("Nairobi, Kenya", -1.2921, 36.8219),
+    ("Cairo, Egypt", 30.0444, 31.2357), ("Mumbai, India", 19.0760, 72.8777),
+    ("Bali, Indonesia", -8.3405, 115.0920), ("Rio de Janeiro, Brazil", -22.9068, -43.1729),
+    ("Buenos Aires, Argentina", -34.6037, -58.3816), ("Bogota, Colombia", 4.7110, -74.0721),
+    ("Lima, Peru", -12.0464, -77.0428), ("Honolulu, USA", 21.3069, -157.8583),
+    ("Reykjavik, Iceland", 64.1466, -21.9426), ("Moscow, Russia", 55.7558, 37.6173),
+    ("Beijing, China", 39.9042, 116.4074), ("Shanghai, China", 31.2304, 121.4737),
+]
+
+
+def recommend_locations(jd_ut, theme_planets, top_n=5, orb_degrees=8):
+    """
+    Scans the candidate city list and ranks them by how close any of the
+    theme's relevant planetary lines pass -- the actual "where should I go
+    for X" engine. theme_planets is a list like ["Venus", "Moon"] for a
+    love-themed question.
+    """
+    lines = compute_astrocartography_lines(jd_ut)
+    results = []
+    for name, lat, lon in CANDIDATE_CITIES:
+        hits = check_location_influence(lines, lat, lon, orb_degrees)
+        theme_hits = [h for h in hits if h["planet"] in theme_planets]
+        if theme_hits:
+            best = min(theme_hits, key=lambda h: h["distance_deg"])
+            results.append({"city": name, "lat": lat, "lon": lon,
+                             "best_hit": best, "all_theme_hits": theme_hits})
+    results.sort(key=lambda r: r["best_hit"]["distance_deg"])
+    return results[:top_n]
+
+
 # --- Synastry ----------------------------------------------------------
 # Comparing two charts against each other -- for relationship compatibility
 # OR for founder-to-business comparison, since both are just "two already-

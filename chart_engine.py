@@ -468,6 +468,7 @@ def generate_reading(day_result, natal_positions, natal_houses=None):
 import json
 import os
 import urllib.request
+import urllib.error
 
 CONFIDENCE_THRESHOLD = 0.7
 
@@ -504,8 +505,15 @@ def classify_question_live(question_text, api_key=None):
         headers={"x-api-key": api_key, "anthropic-version": "2023-06-01",
                  "content-type": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        result = json.loads(resp.read())
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            result = json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        # Surface Anthropic's ACTUAL error message instead of a bare
+        # "400 Bad Request" -- this is what tells us if it's a bad key,
+        # a bad model name, or something else entirely.
+        error_body = e.read().decode()
+        raise RuntimeError(f"Anthropic API returned {e.code}: {error_body}")
     return json.loads(result["content"][0]["text"])
 
 

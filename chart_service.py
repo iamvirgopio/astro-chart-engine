@@ -117,7 +117,7 @@ def get_astrocartography(req: AstrocartographyRequest):
     """
     try:
         lines = ce.compute_astrocartography_lines(req.julian_day_ut)
-        hits = ce.check_location_influence(lines, req.query_lat, req.query_lon, req.orb_degrees)
+        hits = ce.check_location_influence(lines, query_lat=req.query_lat, query_lon=req.query_lon, orb_degrees=req.orb_degrees)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"hits": hits}
@@ -153,7 +153,7 @@ class SynastryRequest(BaseModel):
 def get_synastry(req: SynastryRequest):
     """Every aspect between two charts' planets -- relationship or founder/business comparison."""
     try:
-        hits = ce.compute_synastry(req.chart_a_positions, req.chart_b_positions, req.label_a, req.label_b)
+        hits = ce.compute_synastry(req.chart_a_positions, req.chart_b_positions, label_a=req.label_a, label_b=req.label_b)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"hits": hits}
@@ -162,6 +162,7 @@ def get_synastry(req: SynastryRequest):
 class RecommendLocationsRequest(BaseModel):
     julian_day_ut: float
     theme_planets: list[str]
+    theme_lines: list[str] | None = None
     top_n: int = 5
     orb_degrees: float = 8
 
@@ -171,7 +172,10 @@ def get_recommended_locations(req: RecommendLocationsRequest):
     """The real 'where should I go for X' engine -- ranks real candidate
     cities by proximity to the theme's relevant planetary lines."""
     try:
-        results = ce.recommend_locations(req.julian_day_ut, req.theme_planets, req.top_n, req.orb_degrees)
+        results = ce.recommend_locations(
+            jd_ut=req.julian_day_ut, theme_planets=req.theme_planets,
+            theme_lines=req.theme_lines, top_n=req.top_n, orb_degrees=req.orb_degrees,
+        )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"results": results}

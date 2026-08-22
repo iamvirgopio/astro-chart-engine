@@ -99,3 +99,42 @@ def get_vibe_of_day(req: VibeOfDayRequest):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     return reading
+
+
+class AstrocartographyRequest(BaseModel):
+    julian_day_ut: float  # from the natal chart's own computed output
+    query_lat: float = Field(ge=-90, le=90)
+    query_lon: float = Field(ge=-180, le=180)
+    orb_degrees: float = 6
+
+
+@app.post("/astrocartography")
+def get_astrocartography(req: AstrocartographyRequest):
+    """
+    Which of the natal chart's planetary lines fall near a given location.
+    julian_day_ut comes straight from the natal chart's own /chart output --
+    the frontend never recomputes it, just passes it through.
+    """
+    try:
+        lines = ce.compute_astrocartography_lines(req.julian_day_ut)
+        hits = ce.check_location_influence(lines, req.query_lat, req.query_lon, req.orb_degrees)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"hits": hits}
+
+
+class SynastryRequest(BaseModel):
+    chart_a_positions: dict
+    chart_b_positions: dict
+    label_a: str = "A"
+    label_b: str = "B"
+
+
+@app.post("/synastry")
+def get_synastry(req: SynastryRequest):
+    """Every aspect between two charts' planets -- relationship or founder/business comparison."""
+    try:
+        hits = ce.compute_synastry(req.chart_a_positions, req.chart_b_positions, req.label_a, req.label_b)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"hits": hits}

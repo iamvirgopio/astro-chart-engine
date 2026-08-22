@@ -123,6 +123,25 @@ def get_astrocartography(req: AstrocartographyRequest):
     return {"hits": hits}
 
 
+class AstrocartographyLinesRequest(BaseModel):
+    julian_day_ut: float
+
+
+@app.post("/astrocartography-lines")
+def get_astrocartography_lines(req: AstrocartographyLinesRequest):
+    """
+    Returns the RAW line geometry (not a proximity check) -- every planet's
+    MC/IC longitude and full AC/DC curves. This is what a "recommend me
+    places" feature needs: the actual line to sample points along, not a
+    yes/no check against one place someone already named.
+    """
+    try:
+        lines = ce.compute_astrocartography_lines(req.julian_day_ut)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"lines": lines}
+
+
 class SynastryRequest(BaseModel):
     chart_a_positions: dict
     chart_b_positions: dict
@@ -138,3 +157,21 @@ def get_synastry(req: SynastryRequest):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"hits": hits}
+
+
+class RecommendLocationsRequest(BaseModel):
+    julian_day_ut: float
+    theme_planets: list[str]
+    top_n: int = 5
+    orb_degrees: float = 8
+
+
+@app.post("/recommend-locations")
+def get_recommended_locations(req: RecommendLocationsRequest):
+    """The real 'where should I go for X' engine -- ranks real candidate
+    cities by proximity to the theme's relevant planetary lines."""
+    try:
+        results = ce.recommend_locations(req.julian_day_ut, req.theme_planets, req.top_n, req.orb_degrees)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"results": results}

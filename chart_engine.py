@@ -360,6 +360,8 @@ WHY_PHRASES = {
     ("Pluto", "sextile"): "Pluto's lightly supporting your natal {n_planet} — a small chance to shift something around {n_planet_house_note} for good.",
     ("North Node", "trine"): "The North Node's trine your natal {n_planet} — this pulls you toward where you're actually headed, around {n_planet_house_note}.",
     ("North Node", "sextile"): "The North Node's lightly favoring your natal {n_planet} — a nudge in the right direction around {n_planet_house_note}.",
+    ("Chiron", "trine"): "Chiron's trine your natal {n_planet} — an easier day to be gentle with yourself around {n_planet_house_note}.",
+    ("Chiron", "sextile"): "Chiron's lightly favoring your natal {n_planet} — a small chance for something old to feel less tender around {n_planet_house_note}.",
 }
 WHAT_S_OFF_PHRASES = {
     ("Sun", "square"): "The Sun's squaring your natal {n_planet} — a little friction around {n_planet_house_note}, more annoying than serious.",
@@ -384,6 +386,8 @@ WHAT_S_OFF_PHRASES = {
     ("Pluto", "opposition"): "Pluto opposes your natal {n_planet} — a power dynamic around {n_planet_house_note} might come to a head. Stay aware of it, don't force a resolution today.",
     ("North Node", "square"): "The North Node squares your natal {n_planet} — a little friction between where you're comfortable and where you're headed, around {n_planet_house_note}.",
     ("North Node", "opposition"): "The North Node opposes your natal {n_planet} — old habits around {n_planet_house_note} might feel extra tempting today. Worth noticing, not necessarily following.",
+    ("Chiron", "square"): "Chiron squares your natal {n_planet} — an old sore spot might get poked around {n_planet_house_note}. Doesn't mean it's serious.",
+    ("Chiron", "opposition"): "Chiron opposes your natal {n_planet} — something tender around {n_planet_house_note} might come up today. Worth being gentle with yourself about it.",
 }
 HOUSE_NOTES = {
     1: "your sense of self", 2: "your money and what you value",

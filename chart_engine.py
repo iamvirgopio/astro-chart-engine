@@ -435,7 +435,7 @@ def generate_reading(day_result, natal_positions, natal_houses=None):
     elif score > -1:
         verdict = "Wash of a day -- take it or leave it."
     else:
-        verdict = "Pass on today."
+        verdict = "Pass on it today."
 
     favorable_hits = [h for h in hits if h["aspect"] in FAVORABLE]
     tense_hits = [h for h in hits if h["aspect"] in TENSE]

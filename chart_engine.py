@@ -505,6 +505,7 @@ def classify_question_live(question_text, api_key=None):
         headers={"x-api-key": api_key, "anthropic-version": "2023-06-01",
                  "content-type": "application/json"},
     )
+
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
             result = json.loads(resp.read())
@@ -514,7 +515,22 @@ def classify_question_live(question_text, api_key=None):
         # a bad model name, or something else entirely.
         error_body = e.read().decode()
         raise RuntimeError(f"Anthropic API returned {e.code}: {error_body}")
-    return json.loads(result["content"][0]["text"])
+
+    raw_text = result["content"][0]["text"].strip()
+    # Models sometimes wrap JSON in markdown fences even when told not to
+    # ("```json\n{...}\n```") -- strip those before parsing.
+    if raw_text.startswith("```"):
+        raw_text = raw_text.split("```")[1]
+        if raw_text.startswith("json"):
+            raw_text = raw_text[4:]
+        raw_text = raw_text.strip()
+
+    try:
+        return json.loads(raw_text)
+    except json.JSONDecodeError:
+        # If it STILL doesn't parse, show the actual text instead of a
+        # bare "Expecting value" error with no way to see what came back.
+        raise RuntimeError(f"Couldn't parse classifier response as JSON. Raw text was: {raw_text!r}")
 
 
 def route_with_confidence(question_text, classify_fn=classify_question_live):

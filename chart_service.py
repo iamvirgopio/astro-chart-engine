@@ -80,6 +80,28 @@ class VibeOfDayRequest(BaseModel):
     house_system: str = "placidus"
 
 
+@app.post("/today-transits")
+def get_today_transits(req: VibeOfDayRequest):
+    """Raw, unblended transit content for today (why/whats_off, no AI
+    layer touching it) -- used by the ask page for guidance-style
+    questions, which combine this with real natal placement content
+    client-side before a single blend call, rather than blending twice."""
+    from datetime import date
+    today = date.today()
+    try:
+        natal_houses = req.natal_chart["houses_and_angles"][req.house_system]["houses"]
+        jd_ut = ce.julian_day_utc(today.year, today.month, today.day, 12, 0, 0)
+        today_positions = ce.compute_positions(jd_ut)
+        score, hits = ce.score_day_against_natal(
+            today_positions, req.natal_chart["positions"], "timing", natal_houses
+        )
+        day_result = {"date": today.isoformat(), "score": score, "hits": hits}
+        reading = ce.generate_reading(day_result, req.natal_chart["positions"], natal_houses)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return reading
+
+
 @app.post("/vibe-of-day")
 def get_vibe_of_day(req: VibeOfDayRequest):
     """

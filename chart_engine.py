@@ -36,6 +36,19 @@ PLANETS = {
     "Saturn": swe.SATURN, "Uranus": swe.URANUS, "Neptune": swe.NEPTUNE,
     "Pluto": swe.PLUTO, "Chiron": swe.CHIRON,
     "North Node": swe.TRUE_NODE,
+    # Added for full coverage -- Black Moon Lilith is a pure mathematical
+    # point (lunar apogee), always available. The asteroids need the same
+    # seas_18.se1 file already uploaded for Chiron, so they come free once
+    # that file is in place -- confirmed by testing each individually.
+    "Black Moon Lilith": swe.MEAN_APOG,
+    "Ceres": swe.CERES, "Pallas": swe.PALLAS, "Juno": swe.JUNO, "Vesta": swe.VESTA,
+    "Pholus": swe.PHOLUS,
+    # Eris and Sedna are NOT included here -- they require their own
+    # object-specific ephemeris files (s136199s.se1, se90377s.se1) that
+    # aren't sourced yet. Adding them later is a matter of downloading
+    # those two files from the official Swiss Ephemeris archive and
+    # uploading them alongside seas_18.se1 -- flagging honestly rather
+    # than silently omitting or faking a value.
 }
 
 FLAGS = swe.FLG_MOSEPH | swe.FLG_SPEED  # no data files required
@@ -80,13 +93,23 @@ def julian_day_utc(year, month, day, hour, minute, utc_offset_hours):
     return swe.julday(year, month, day, decimal_hour_utc)
 
 
-def compute_positions(jd_ut):
+def compute_positions(jd_ut, zodiac="tropical"):
     """
     Raw planetary positions at a given Julian Day (UT).
-    Chiron requires a downloaded asteroid seed file (seas_18.se1) even in
-    Moshier mode — if it's not present, we skip Chiron rather than fail
-    the whole chart. Flagged in the result so the caller knows it's missing.
+    zodiac: "tropical" (Western default) or "sidereal" (Vedic -- uses the
+    Lahiri ayanamsa, the official Indian government standard and the
+    most widely used ayanamsa in Vedic astrology).
+
+    Chiron and the asteroids require a downloaded seed file (seas_18.se1)
+    even in Moshier mode -- if it's not present, they're skipped rather
+    than failing the whole chart. Flagged in the result so the caller
+    knows what's missing.
     """
+    ayanamsa = 0.0
+    if zodiac == "sidereal":
+        swe.set_sid_mode(swe.SIDM_LAHIRI)
+        ayanamsa = swe.get_ayanamsa_ut(jd_ut)
+
     positions = {}
     skipped = []
     for name, code in PLANETS.items():
@@ -95,7 +118,7 @@ def compute_positions(jd_ut):
         except swe.Error:
             skipped.append(name)
             continue
-        lon = xx[0]
+        lon = (xx[0] - ayanamsa) % 360
         speed = xx[3]
         sign, deg = deg_to_sign(lon)
         positions[name] = {
@@ -105,34 +128,63 @@ def compute_positions(jd_ut):
             "retrograde": speed < 0,
             "speed_deg_per_day": round(speed, 4),
         }
+
+    # South Node is always exactly opposite North Node -- not a separate
+    # body, just the other end of the same axis. Included server-side so
+    # every consumer gets it consistently instead of each frontend
+    # re-deriving it.
+    if "North Node" in positions:
+        south_lon = (positions["North Node"]["longitude"] + 180) % 360
+        south_sign, south_deg = deg_to_sign(south_lon)
+        positions["South Node"] = {
+            "longitude": round(south_lon, 4), "sign": south_sign,
+            "degree_in_sign": south_deg, "retrograde": positions["North Node"]["retrograde"],
+            "speed_deg_per_day": positions["North Node"]["speed_deg_per_day"],
+        }
+
     if skipped:
         positions["_skipped"] = skipped
     return positions
 
 
-def compute_angles_and_houses(jd_ut, lat, lon):
-    """Returns Placidus houses/angles and Whole Sign houses/angles from one calc."""
+def compute_angles_and_houses(jd_ut, lat, lon, zodiac="tropical"):
+    """Returns Placidus houses/angles and Whole Sign houses/angles from one calc.
+    zodiac: "tropical" or "sidereal" (Lahiri ayanamsa). House cusps are always
+    computed from the real physical horizon/meridian (tropical), then
+    re-expressed in sidereal terms by subtracting the ayanamsa -- this is
+    the standard approach, not a separate house-calculation method."""
+    ayanamsa = 0.0
+    if zodiac == "sidereal":
+        swe.set_sid_mode(swe.SIDM_LAHIRI)
+        ayanamsa = swe.get_ayanamsa_ut(jd_ut)
+
     # Placidus
     cusps_p, ascmc_p = swe.houses(jd_ut, lat, lon, b'P')
-    asc_p, mc_p = ascmc_p[0], ascmc_p[1]
+    asc_p = (ascmc_p[0] - ayanamsa) % 360
+    mc_p = (ascmc_p[1] - ayanamsa) % 360
+    vertex_p = (ascmc_p[3] - ayanamsa) % 360
     asc_sign, asc_deg = deg_to_sign(asc_p)
     mc_sign, mc_deg = deg_to_sign(mc_p)
+    vertex_sign, vertex_deg = deg_to_sign(vertex_p)
 
     placidus = {
         "ascendant": {"sign": asc_sign, "degree_in_sign": asc_deg, "longitude": round(asc_p, 4)},
         "midheaven": {"sign": mc_sign, "degree_in_sign": mc_deg, "longitude": round(mc_p, 4)},
+        "vertex": {"sign": vertex_sign, "degree_in_sign": vertex_deg, "longitude": round(vertex_p, 4)},
         "houses": [
-            {"house": i + 1, **dict(zip(["sign", "degree_in_sign"], deg_to_sign(cusps_p[i])))}
+            {"house": i + 1, **dict(zip(["sign", "degree_in_sign"], deg_to_sign((cusps_p[i] - ayanamsa) % 360)))}
             for i in range(12)
         ],
     }
 
     # Whole Sign: house 1 = the Ascendant's whole sign; each subsequent house
     # is simply the next sign in order, cusp at 0 degrees of that sign.
+    # This is also the standard default house system for Vedic charts.
     asc_sign_index = SIGNS.index(asc_sign)
     whole_sign = {
         "ascendant": placidus["ascendant"],  # Asc degree is the same point regardless of house system
         "midheaven": placidus["midheaven"],
+        "vertex": placidus["vertex"],
         "houses": [
             {"house": i + 1, "sign": SIGNS[(asc_sign_index + i) % 12], "degree_in_sign": 0.0}
             for i in range(12)
@@ -2117,32 +2169,90 @@ def compute_synastry(chart_a_positions, chart_b_positions, label_a="A", label_b=
     return sorted(hits, key=lambda h: h["orb"])
 
 
-def compute_chart(year, month, day, hour, minute, lat, lon, unknown_time=False):
+NAKSHATRAS = [
+    "Ashwini", "Bharani", "Krittika", "Rohini", "Mrigashira", "Ardra", "Punarvasu",
+    "Pushya", "Ashlesha", "Magha", "Purva Phalguni", "Uttara Phalguni", "Hasta",
+    "Chitra", "Swati", "Vishakha", "Anuradha", "Jyeshtha", "Mula", "Purva Ashadha",
+    "Uttara Ashadha", "Shravana", "Dhanishta", "Shatabhisha", "Purva Bhadrapada",
+    "Uttara Bhadrapada", "Revati",
+]
+
+
+def which_nakshatra(sidereal_longitude):
+    """27 lunar-mansion divisions of 13°20' each, starting at 0° sidereal Aries.
+    Only meaningful for sidereal (Vedic) longitudes -- passing a tropical
+    longitude here gives a nonsense answer, since Nakshatras are a Vedic
+    concept tied to the sidereal zodiac specifically."""
+    index = int((sidereal_longitude % 360) // (360 / 27))
+    return NAKSHATRAS[index]
+
+
+def compute_part_of_fortune(sun_lon, moon_lon, asc_lon, is_day_chart):
+    """Classical Arabic Part -- day-chart and night-chart formulas differ.
+    is_day_chart: True if the Sun is above the horizon (houses 7-12)."""
+    if is_day_chart:
+        return (asc_lon + moon_lon - sun_lon) % 360
+    return (asc_lon + sun_lon - moon_lon) % 360
+
+
+def compute_chart(year, month, day, hour, minute, lat, lon, unknown_time=False, chart_system="western"):
     """
     Main entry point. Caller supplies LOCAL birth date/time + coordinates —
     the correct historical UTC offset is resolved automatically.
 
-    If unknown_time=True, defaults to noon local and omits houses/angles
-    (they're meaningless without an exact birth time) — planetary signs
-    are still valid since most planets don't change sign within a single day.
+    chart_system: "western" (tropical zodiac, Placidus/Whole Sign choice)
+    or "vedic" (sidereal zodiac using the Lahiri ayanamsa, Whole Sign
+    houses by standard convention, includes each planet's Nakshatra).
+    These are genuinely different systems, not a label swap -- the
+    underlying positions differ by the ayanamsa amount (currently ~24°).
+
+    If unknown_time=True, defaults to noon local and omits houses/angles/
+    Part of Fortune/vertex (all meaningless without an exact birth time)
+    — planetary signs are still valid since most planets don't change
+    sign within a single day.
     """
     if unknown_time:
         hour, minute = 12, 0
 
+    zodiac = "sidereal" if chart_system == "vedic" else "tropical"
+
     utc_offset_hours, tz_name = resolve_utc_offset(year, month, day, hour, minute, lat, lon)
     jd_ut = julian_day_utc(year, month, day, hour, minute, utc_offset_hours)
-    positions = compute_positions(jd_ut)
+    positions = compute_positions(jd_ut, zodiac=zodiac)
+
+    if chart_system == "vedic":
+        for name, data in positions.items():
+            if name == "_skipped":
+                continue
+            data["nakshatra"] = which_nakshatra(data["longitude"])
 
     result = {
         "julian_day_ut": jd_ut,
         "timezone": tz_name,
         "utc_offset_hours": utc_offset_hours,
+        "chart_system": chart_system,
+        "zodiac": zodiac,
         "positions": positions,
         "houses_and_angles": None,
+        "part_of_fortune": None,
         "time_known": not unknown_time,
     }
 
     if not unknown_time:
-        result["houses_and_angles"] = compute_angles_and_houses(jd_ut, lat, lon)
+        angles = compute_angles_and_houses(jd_ut, lat, lon, zodiac=zodiac)
+        result["houses_and_angles"] = angles
+
+        # Part of Fortune needs Sun, Moon, Ascendant, and which side of the
+        # horizon the Sun is on -- all now available.
+        house_system_for_day_check = "whole_sign" if chart_system == "vedic" else "placidus"
+        houses_for_check = angles[house_system_for_day_check]["houses"]
+        sun_house = which_house(positions["Sun"]["longitude"], houses_for_check)
+        is_day_chart = sun_house >= 7
+        asc_lon = angles[house_system_for_day_check]["ascendant"]["longitude"]
+        pof_lon = compute_part_of_fortune(positions["Sun"]["longitude"], positions["Moon"]["longitude"], asc_lon, is_day_chart)
+        pof_sign, pof_deg = deg_to_sign(pof_lon)
+        result["part_of_fortune"] = {"longitude": round(pof_lon, 4), "sign": pof_sign, "degree_in_sign": pof_deg}
+        if chart_system == "vedic":
+            result["part_of_fortune"]["nakshatra"] = which_nakshatra(pof_lon)
 
     return result

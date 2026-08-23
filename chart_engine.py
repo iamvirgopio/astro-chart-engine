@@ -539,6 +539,7 @@ def _blend_vibe_ingredients(ingredients, api_key=None):
     payload = jsonlib.dumps({
         "model": "claude-haiku-4-5-20251001",
         "max_tokens": 300,
+        "temperature": 0.4,
         "system": system_prompt,
         "messages": [{"role": "user", "content": "Write today's reading."}],
     }).encode("utf-8")
@@ -783,6 +784,7 @@ def generate_integrated_question_reading(top_day, natal_positions, natal_houses,
         payload = jsonlib.dumps({
             "model": "claude-haiku-4-5-20251001",
             "max_tokens": 300,
+            "temperature": 0.4,
             "system": system_prompt,
             "messages": [{"role": "user", "content": "Answer the question."}],
         }).encode("utf-8")

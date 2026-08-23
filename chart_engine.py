@@ -790,16 +790,16 @@ def jd_to_iso_utc(jd):
 # actually means for planning: what's favorable to do, what's risky to
 # lock in. Keyed by (planet, favorable-or-tense).
 TRANSIT_SIGNIFICANCE = {
-    ("Jupiter", "favorable"): "Good day for expansion -- signing deals, launching something, saying yes to an opportunity. Jupiter transits like this tend to bring genuine luck to whatever you start.",
-    ("Jupiter", "tense"): "Watch for overpromising or overcommitting today -- Jupiter under tension can inflate confidence past what's realistic. Fine for big talk, risky for binding commitments like contracts.",
-    ("Saturn", "favorable"): "Good day for serious commitments that need to actually last -- contracts, structure, long-term planning. Saturn transits like this reward discipline and follow-through.",
-    ("Saturn", "tense"): "Things can feel heavier or slower than usual today -- delays, real obstacles, or a decision that needs more caution than normal. Not the day to rush a big commitment; better for review than for signing something new.",
-    ("Uranus", "favorable"): "Good day for trying something different -- unexpected opportunities tend to actually pay off today. Less ideal for anything that needs total predictability.",
-    ("Uranus", "tense"): "Expect the unexpected, and not always the good kind -- sudden changes, disruptions, or plans falling through. Risky day for locking in anything that needs stability, like signing a contract or making a big purchase.",
-    ("Neptune", "favorable"): "Good day for creative or intuitive work, less good for anything requiring hard precision. Neptune can make details blurry, so double-check anything factual today.",
-    ("Neptune", "tense"): "Confusion, miscommunication, or things not being quite what they seem are more likely today. Bad day to sign anything without reading the fine print twice -- Neptune transits like this are notorious for hidden details.",
-    ("Pluto", "favorable"): "Good day for real, deep work -- research, difficult conversations, anything that benefits from intensity and focus.",
-    ("Pluto", "tense"): "Power struggles or control issues are more likely to surface today. If a negotiation or contract involves a real power imbalance, today's probably not the day to finalize it.",
+    ("Jupiter", "favorable"): "Good day to say yes -- to an opportunity, a trip, a new connection, whatever's genuinely in front of you. Jupiter transits like this tend to expand whatever they touch.",
+    ("Jupiter", "tense"): "Confidence can outrun realism today -- easy to overcommit, overspend, or promise more than you can actually deliver, in any part of life. Good day for enthusiasm, risky day for locking in big decisions.",
+    ("Saturn", "favorable"): "Good day for anything that needs real follow-through -- a serious conversation, finally starting a routine, a commitment you actually intend to keep.",
+    ("Saturn", "tense"): "Things feel heavier and slower today -- delays, real obstacles, a decision that needs more caution than usual. Better for review than for locking anything in, whether that's a relationship talk, a purchase, or a new routine.",
+    ("Uranus", "favorable"): "Good day for trying something you wouldn't normally try -- an unexpected opportunity, a spontaneous plan, a different way of doing something familiar.",
+    ("Uranus", "tense"): "Expect the unexpected, and not always the good kind -- plans falling through, a sudden change of heart (yours or someone else's), tech glitches. Risky day for anything that needs to go exactly as planned.",
+    ("Neptune", "favorable"): "Good day for creative work, intuition, or a conversation that needs real empathy. Less reliable for anything requiring hard precision or facts.",
+    ("Neptune", "tense"): "Miscommunication and confusion are more likely today -- crossed wires, someone (maybe you) not saying exactly what they mean, or seeing a situation less clearly than it feels like you are. Double-check anything important before acting on it.",
+    ("Pluto", "favorable"): "Good day for real depth -- a hard conversation you've been avoiding, deep focus on something that matters, getting to the truth of a situation.",
+    ("Pluto", "tense"): "Power struggles or control issues are more likely to surface today, in any relationship or situation where someone's trying to hold the reins. Not the best day to force an outcome -- influence lands better than control right now.",
 }
 
 

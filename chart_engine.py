@@ -1159,9 +1159,15 @@ def find_eclipses_in_range(start_jd, end_jd):
     return sorted(eclipses, key=lambda e: e["jd"])
 
 
-def calendar_range(start_year, start_month, start_day, num_days, natal_positions, natal_houses=None):
+def calendar_range(start_year, start_month, start_day, num_days, natal_positions=None, natal_houses=None):
     """Full calendar payload for a date range: per-day moon phase and
-    notable transits, plus void-of-course windows for the whole range."""
+    notable transits, plus void-of-course windows for the whole range.
+    natal_positions is optional -- moon phase, void moon, retrogrades,
+    and eclipses are all chart-independent, universal phenomena, so a
+    calendar with no natal chart attached (e.g. someone using a business
+    calendar with no business chart created yet) still works fully.
+    Only notable_transits, which is scored against a specific chart,
+    comes back empty when no chart is given."""
     import datetime
     start = datetime.date(start_year, start_month, start_day)
     start_jd = julian_day_utc(start.year, start.month, start.day, 12, 0, 0)
@@ -1174,7 +1180,7 @@ def calendar_range(start_year, start_month, start_day, num_days, natal_positions
         days.append({
             "date": d.isoformat(),
             "moon_phase": moon_phase(jd_noon),
-            "notable_transits": compute_notable_transits(jd_noon, natal_positions, natal_houses),
+            "notable_transits": compute_notable_transits(jd_noon, natal_positions, natal_houses) if natal_positions else [],
         })
 
     void_periods = compute_void_periods_in_range(start_jd, end_jd)

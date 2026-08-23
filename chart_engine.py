@@ -643,6 +643,179 @@ def handle_question(question_text, natal_chart, lat, lon,
 EQ_FLAGS = swe.FLG_MOSEPH | swe.FLG_SPEED | swe.FLG_EQUATORIAL
 
 
+MOON_PHASE_NAMES = [
+    "New Moon", "Waxing Crescent", "First Quarter", "Waxing Gibbous",
+    "Full Moon", "Waning Gibbous", "Last Quarter", "Waning Crescent",
+]
+
+
+def moon_phase(jd_ut):
+    """Moon phase from the Sun-Moon angular separation. 8 phases, each a
+    45-degree slice, starting at 0-degree separation (New Moon)."""
+    sun_xx, _ = swe.calc_ut(jd_ut, swe.SUN, FLAGS)
+    moon_xx, _ = swe.calc_ut(jd_ut, swe.MOON, FLAGS)
+    angle = (moon_xx[0] - sun_xx[0]) % 360
+    index = int((angle + 22.5) // 45) % 8
+    return {"phase": MOON_PHASE_NAMES[index], "angle_deg": round(angle, 2)}
+
+
+_VOC_ASPECT_ANGLES = [0, 60, 90, 120, 180]
+_VOC_PLANETS = {
+    "Sun": swe.SUN, "Mercury": swe.MERCURY, "Venus": swe.VENUS, "Mars": swe.MARS,
+    "Jupiter": swe.JUPITER, "Saturn": swe.SATURN, "Uranus": swe.URANUS,
+    "Neptune": swe.NEPTUNE, "Pluto": swe.PLUTO,
+}  # classical + modern planets, no asteroids/nodes -- standard VOC practice
+
+
+def _moon_lon(jd):
+    xx, _ = swe.calc_ut(jd, swe.MOON, FLAGS)
+    return xx[0]
+
+
+def _signed_sep(moon, planet, target_angle):
+    return (moon - planet - target_angle + 180) % 360 - 180
+
+
+def _find_moon_sign_boundary(jd_ref, direction, step=0.05):
+    """direction=1 to search forward for the next ingress, -1 to search
+    backward for when the Moon entered its current sign."""
+    current_sign = int(_moon_lon(jd_ref) // 30)
+    jd = jd_ref
+    while int(_moon_lon(jd) // 30) == current_sign:
+        jd += direction * step
+    lo, hi = (jd - direction * step, jd) if direction == 1 else (jd, jd - direction * step)
+    for _ in range(30):
+        mid = (lo + hi) / 2
+        same_sign = int(_moon_lon(mid) // 30) == current_sign
+        if direction == 1:
+            if same_sign:
+                lo = mid
+            else:
+                hi = mid
+        else:
+            if same_sign:
+                hi = mid
+            else:
+                lo = mid
+    return hi
+
+
+def _find_moon_aspects_in_window(jd_start, jd_end, coarse_step=0.02):
+    """Every exact Moon-to-planet aspect within a time window. Verified
+    against a real wraparound bug found during testing: a naive sign-flip
+    check near +/-180 degrees produces false positives, since the signed
+    separation function jumps discontinuously there even with no real
+    aspect happening -- the fix requires also checking the jump is small
+    (continuous), not just that the sign flipped."""
+    hits = []
+    for name, code in _VOC_PLANETS.items():
+        planet_lon = lambda jd, code=code: swe.calc_ut(jd, code, FLAGS)[0][0]
+        for angle in _VOC_ASPECT_ANGLES:
+            jd = jd_start
+            prev_val = _signed_sep(_moon_lon(jd), planet_lon(jd), angle)
+            jd2 = jd + coarse_step
+            while jd2 <= jd_end:
+                val = _signed_sep(_moon_lon(jd2), planet_lon(jd2), angle)
+                is_sign_flip = (prev_val < 0) != (val < 0)
+                is_continuous = abs(val - prev_val) < 10
+                if is_sign_flip and is_continuous:
+                    lo, hi = jd, jd2
+                    lo_val = prev_val
+                    for _ in range(40):
+                        mid = (lo + hi) / 2
+                        mval = _signed_sep(_moon_lon(mid), planet_lon(mid), angle)
+                        if (mval < 0) == (lo_val < 0):
+                            lo, lo_val = mid, mval
+                        else:
+                            hi = mid
+                    hits.append({"planet": name, "angle": angle, "jd": hi})
+                jd, prev_val = jd2, val
+                jd2 += coarse_step
+    return sorted(hits, key=lambda h: h["jd"])
+
+
+def void_of_course_period(jd_ref):
+    """Returns the void-of-course window for whichever sign the Moon is
+    in at jd_ref: the period after its LAST aspect to another planet in
+    that sign, up until it changes signs. If no aspect occurs during the
+    whole sign transit, the Moon is void for the entire transit."""
+    ingress_start = _find_moon_sign_boundary(jd_ref, direction=-1)
+    ingress_end = _find_moon_sign_boundary(jd_ref, direction=1)
+    aspects = _find_moon_aspects_in_window(ingress_start, ingress_end)
+    void_start = aspects[-1]["jd"] if aspects else ingress_start
+    return {
+        "sign_entered_jd": ingress_start, "sign_exits_jd": ingress_end,
+        "void_start_jd": void_start, "void_end_jd": ingress_end,
+        "last_aspect": aspects[-1] if aspects else None,
+    }
+
+
+def jd_to_iso_utc(jd):
+    """Convert a Julian Day (UT) to a readable ISO 8601 UTC string."""
+    year, month, day, hour_decimal = swe.revjul(jd)
+    total_seconds = round(hour_decimal * 3600)
+    hour = total_seconds // 3600
+    minute = (total_seconds % 3600) // 60
+    second = total_seconds % 60
+    return f"{year:04d}-{month:02d}-{day:02d}T{hour:02d}:{minute:02d}:{second:02d}Z"
+
+
+def compute_notable_transits(jd_ut_noon, natal_positions, natal_houses=None):
+    """Which transits are actually worth flagging on a calendar for this
+    person's chart -- outer planets (the ones that mark real chapters,
+    not daily noise) within a tight orb, reusing the existing scoring
+    engine rather than a separate calculation."""
+    day_positions = compute_positions(jd_ut_noon)
+    _, hits = score_day_against_natal(day_positions, natal_positions, lens="timing", natal_houses=natal_houses)
+    OUTER = {"Jupiter", "Saturn", "Uranus", "Neptune", "Pluto"}
+    notable = [h for h in hits if h["transiting"] in OUTER and h["orb"] < 3]
+    notable.sort(key=lambda h: h["orb"])
+    return notable[:3]
+
+
+def compute_void_periods_in_range(start_jd, end_jd):
+    """All void-of-course windows overlapping [start_jd, end_jd], computed
+    once per Moon sign-transit rather than redundantly recomputing the
+    same window for every day inside it."""
+    periods = []
+    jd = start_jd
+    while jd < end_jd:
+        voc = void_of_course_period(jd)
+        periods.append(voc)
+        jd = voc["sign_exits_jd"] + 0.01  # nudge past the boundary
+    return periods
+
+
+def calendar_range(start_year, start_month, start_day, num_days, natal_positions, natal_houses=None):
+    """Full calendar payload for a date range: per-day moon phase and
+    notable transits, plus void-of-course windows for the whole range."""
+    import datetime
+    start = datetime.date(start_year, start_month, start_day)
+    start_jd = julian_day_utc(start.year, start.month, start.day, 12, 0, 0)
+    end_jd = julian_day_utc(*(start + datetime.timedelta(days=num_days)).timetuple()[:3], 12, 0, 0)
+
+    days = []
+    for i in range(num_days):
+        d = start + datetime.timedelta(days=i)
+        jd_noon = julian_day_utc(d.year, d.month, d.day, 12, 0, 0)
+        days.append({
+            "date": d.isoformat(),
+            "moon_phase": moon_phase(jd_noon),
+            "notable_transits": compute_notable_transits(jd_noon, natal_positions, natal_houses),
+        })
+
+    void_periods = compute_void_periods_in_range(start_jd, end_jd)
+    void_periods_out = []
+    for v in void_periods:
+        void_periods_out.append({
+            "void_start": jd_to_iso_utc(v["void_start_jd"]),
+            "void_end": jd_to_iso_utc(v["void_end_jd"]),
+            "last_aspect": v["last_aspect"],
+        })
+
+    return {"days": days, "void_periods": void_periods_out}
+
+
 def compute_astrocartography_lines(jd_ut, lat_range=(-66, 66), lat_step=2):
     """
     Returns, per planet: MC/IC longitude (simple meridians) and AC/DC as

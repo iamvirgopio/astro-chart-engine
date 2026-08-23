@@ -193,7 +193,7 @@ class CalendarRangeRequest(BaseModel):
     start_month: int = Field(ge=1, le=12)
     start_day: int = Field(ge=1, le=31)
     num_days: int = Field(ge=1, le=90, default=31)
-    natal_positions: dict
+    natal_positions: dict | None = None
     natal_houses: list | None = None
 
 

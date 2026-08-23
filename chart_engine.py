@@ -505,34 +505,48 @@ ECLIPSE_DAY_GUIDANCE = {
 }
 
 
-def _blend_vibe_ingredients(ingredients, api_key=None):
+def _blend_ingredients_into_answer(ingredients, task_instruction, question_context=None, api_key=None):
     """
-    Weaves real, pre-written ingredients into one cohesive paragraph via
-    the same invisible-AI pattern already used for question routing --
-    the model is given ONLY the real content below and explicitly
-    instructed not to invent any new astrological claims. It's blending
-    voice and flow, not writing astrology.
+    THE single shared blending function for every question-answering
+    surface in the app -- vibe of day, the main reading engine, synastry
+    questions, location questions. One place for the voice rules and the
+    "never invent new astrology" constraint, so every surface stays
+    consistent instead of drifting apart across separately-hand-written
+    versions.
+
+    ingredients: list of (label, text) tuples -- real, pre-written content only.
+    task_instruction: what this specific call needs to accomplish (e.g.
+        "advising someone how to approach today" vs "directly answering
+        their specific question about this connection").
+    question_context: the actual question text, if this is answering one
+        (omit for vibe of day, which isn't answering a typed question).
     """
-    import os, json as jsonlib, re, urllib.request
+    import os, json as jsonlib, urllib.request
     key = api_key or os.environ.get("ANTHROPIC_API_KEY")
     if not key:
         raise RuntimeError("No Anthropic API key configured")
 
     bullet_list = "\n".join(f"- {text}" for _, text in ingredients)
+    question_block = f'They asked: "{question_context}"\n\n' if question_context else ""
 
     system_prompt = (
-        "You write ONE short, cohesive paragraph (3-5 sentences) advising someone how to "
-        "approach today, based ONLY on the real astrological observations given below.\n\n"
+        f"You write ONE short, cohesive paragraph (2-5 sentences) {task_instruction}, "
+        "based ONLY on the real astrological observations given below.\n\n"
         "Voice: plain, direct, casual, mellow -- warm but no fluff, no over-explaining. "
         "Contractions are fine, active voice, dry humor is fine if it fits naturally. "
-        "CRITICAL: never use a contrastive tacked-on clause like 'not X, but Y' or 'not just Z' "
-        "-- this is a specific tell to avoid, not a style choice.\n\n"
+        "CRITICAL: never use a contrastive tacked-on clause like 'not X, but Y' or 'not just Z', "
+        "and never set up an explicit myth-vs-fact or 'here's what's true / here's what isn't' "
+        "structure -- these are specific tells to avoid, not style choices.\n\n"
         "Rules:\n"
         "- Use ONLY the observations given below. Never invent a new astrological claim, "
         "placement, or aspect that isn't listed.\n"
-        "- Weave them into ONE natural paragraph, not a list, not separate sentences per item.\n"
-        "- End with practical, actionable guidance on how to approach today specifically.\n"
+        "- Weave them into ONE natural paragraph, not a list, not separate labeled sentences "
+        "per item, not 'for you specifically' / 'for them' split out as separate parts.\n"
+        + (f"- Directly answer what they actually asked -- don't just restate the astrology in "
+           f"isolation.\n" if question_context else "")
+        + "- End with practical, actionable guidance.\n"
         "- No greeting, no sign-off, no meta-commentary about being an astrology app.\n\n"
+        f"{question_block}"
         f"Real observations to weave together:\n{bullet_list}"
     )
 
@@ -541,7 +555,7 @@ def _blend_vibe_ingredients(ingredients, api_key=None):
         "max_tokens": 300,
         "temperature": 0.4,
         "system": system_prompt,
-        "messages": [{"role": "user", "content": "Write today's reading."}],
+        "messages": [{"role": "user", "content": "Write the reading."}],
     }).encode("utf-8")
     req = urllib.request.Request(
         "https://api.anthropic.com/v1/messages",
@@ -551,6 +565,14 @@ def _blend_vibe_ingredients(ingredients, api_key=None):
     with urllib.request.urlopen(req, timeout=15) as resp:
         body = jsonlib.loads(resp.read())
     return body["content"][0]["text"].strip()
+
+
+def _blend_vibe_ingredients(ingredients, api_key=None):
+    """Thin wrapper over the shared blending function -- kept for the
+    existing call site in generate_integrated_vibe_of_day."""
+    return _blend_ingredients_into_answer(
+        ingredients, task_instruction="advising someone how to approach today", api_key=api_key,
+    )
 
 
 def generate_integrated_vibe_of_day(day_result, natal_positions, natal_houses,
@@ -755,47 +777,12 @@ def generate_integrated_question_reading(top_day, natal_positions, natal_houses,
         return result
 
     try:
-        bullet_list = "\n".join(f"- {text}" for _, text in ingredients)
-        import os, json as jsonlib, urllib.request
-        key = api_key or os.environ.get("ANTHROPIC_API_KEY")
-        if not key:
-            raise RuntimeError("No Anthropic API key configured")
-
-        system_prompt = (
-            "You are answering someone's specific question using ONLY the real astrological "
-            "observations given below, for a specific date already identified as the best match.\n\n"
-            "Voice: plain, direct, casual, mellow -- warm but no fluff, no over-explaining. "
-            "Contractions are fine, active voice. CRITICAL: never use a contrastive tacked-on "
-            "clause like 'not X, but Y' or 'not just Z', and never set up an explicit "
-            "myth-vs-fact or 'here's what's true / here's what isn't' structure -- write "
-            "naturally instead.\n\n"
-            "Rules:\n"
-            "- Use ONLY the observations given below. Never invent a new astrological claim, "
-            "placement, or aspect that isn't listed.\n"
-            "- Explicitly connect the observations to what they actually asked -- don't just "
-            "restate the astrology in isolation.\n"
-            "- Reference the date naturally in your answer, since they want to know when.\n"
-            "- Write 2-4 sentences, one cohesive answer, not a list.\n"
-            "- No greeting, no sign-off, no meta-commentary about being an astrology app.\n\n"
-            f"They asked: \"{question_text}\"\n"
-            f"The best-matching date found: {base_reading['date']}\n\n"
-            f"Real observations for that date:\n{bullet_list}"
+        result["message"] = _blend_ingredients_into_answer(
+            ingredients,
+            task_instruction=f"directly answering their specific question, referencing {base_reading['date']} naturally since they want to know when",
+            question_context=question_text,
+            api_key=api_key,
         )
-        payload = jsonlib.dumps({
-            "model": "claude-haiku-4-5-20251001",
-            "max_tokens": 300,
-            "temperature": 0.4,
-            "system": system_prompt,
-            "messages": [{"role": "user", "content": "Answer the question."}],
-        }).encode("utf-8")
-        req = urllib.request.Request(
-            "https://api.anthropic.com/v1/messages",
-            data=payload,
-            headers={"Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01"},
-        )
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            body = jsonlib.loads(resp.read())
-        result["message"] = body["content"][0]["text"].strip()
     except Exception:
         result["message"] = " ".join(text for _, text in ingredients)
         result["blend_failed"] = True
@@ -2646,6 +2633,25 @@ def recommend_locations(jd_ut, theme_planets, theme_lines=None, top_n=5, orb_deg
 # computed charts, find the aspects between them." No new astronomical
 # calculation needed here, just cross-referencing chart_a's positions
 # against chart_b's using the same find_aspect() logic used for transits.
+
+def blend_answer(ingredients, question_text, api_key=None):
+    """
+    Generic blending entry point for surfaces where the real content
+    library lives on the FRONTEND (synastry's 78-pair library, location's
+    advice banks) rather than in this engine -- takes whatever real
+    ingredients that page already gathered and blends them into one
+    direct answer, without needing the astrology content duplicated
+    server-side. Same shared voice rules as every other blending call.
+    """
+    if not ingredients:
+        raise ValueError("No ingredients given to blend")
+    return _blend_ingredients_into_answer(
+        ingredients,
+        task_instruction="directly answering their specific question",
+        question_context=question_text,
+        api_key=api_key,
+    )
+
 
 def compute_synastry(chart_a_positions, chart_b_positions, label_a="A", label_b="B"):
     """

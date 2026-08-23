@@ -21,6 +21,7 @@ class ChartRequest(BaseModel):
     lat: float = Field(ge=-90, le=90)
     lon: float = Field(ge=-180, le=180)
     unknown_time: bool = False
+    chart_system: str = "western"  # "western" (tropical) or "vedic" (sidereal, Lahiri)
 
 
 @app.post("/chart")
@@ -31,6 +32,7 @@ def get_chart(req: ChartRequest):
             hour=req.hour, minute=req.minute,
             lat=req.lat, lon=req.lon,
             unknown_time=req.unknown_time,
+            chart_system=req.chart_system,
         )
     except Exception as e:
         # Bad coordinates, resolver failures, etc. surface as a clean 400

@@ -197,6 +197,25 @@ class CalendarRangeRequest(BaseModel):
     natal_houses: list | None = None
 
 
+class PlanetaryHoursRequest(BaseModel):
+    year: int
+    month: int = Field(ge=1, le=12)
+    day: int = Field(ge=1, le=31)
+    lat: float
+    lon: float
+
+
+@app.post("/planetary-hours")
+def get_planetary_hours(req: PlanetaryHoursRequest):
+    """Real sunrise/sunset-based planetary hours for a specific date and
+    location -- location matters here, this isn't birth-chart data."""
+    try:
+        result = ce.compute_planetary_hours(req.year, req.month, req.day, req.lat, req.lon)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return result
+
+
 @app.post("/calendar-range")
 def get_calendar_range(req: CalendarRangeRequest):
     """Moon phases, void-of-course windows, and notable transits against

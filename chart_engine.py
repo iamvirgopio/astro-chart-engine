@@ -471,23 +471,146 @@ def _phrase_for(hit, natal_houses, phrase_bank):
     return f"{hit['transiting']} is {verb} your natal {hit['natal']} right now."
 
 
+# Real, practical "how to approach today" content -- not facts alone,
+# genuine guidance -- for the factors that used to just get tacked onto
+# vibe of day as a separate line. This is the actual foundation the
+# integrated vibe-of-day reading blends together; the AI layer only
+# weaves these into one voice, it never invents new astrological claims.
+
+MOON_PHASE_GUIDANCE = {
+    "New Moon": "a fresh-start kind of day -- better for quiet planning and setting real intentions than for big, loud action",
+    "Waxing Crescent": "early momentum building -- a good day to take the first real step on something you've been circling",
+    "First Quarter": "a natural friction point in the cycle -- resistance today is normal, not a sign to quit",
+    "Waxing Gibbous": "a refining day -- adjusting and polishing before things come to a head",
+    "Full Moon": "high visibility, things culminating or coming to light -- emotions run a little closer to the surface than usual",
+    "Waning Gibbous": "a day for sharing what you've learned and processing what just happened, not starting something new",
+    "Last Quarter": "a releasing day -- good for cutting away what's not working rather than adding more",
+    "Waning Crescent": "a rest-and-reflect day, right before the cycle resets -- forcing productivity today usually backfires",
+}
+
+RETROGRADE_DAY_GUIDANCE = {
+    "Mercury": "communication and plans deserve a second look today -- a better day to revisit than to launch",
+    "Venus": "relationships and money benefit from reflection right now, not from forcing a new commitment",
+    "Mars": "energy can feel redirected or blocked today -- better for finishing something than starting a fight or a new project",
+    "Jupiter": "growth is turning inward right now -- internal expansion serves you better than an external launch today",
+    "Saturn": "old structures and commitments are up for honest reassessment right now, not new ones",
+    "Uranus": "change is happening quietly under the surface -- today's better for noticing what's already shifting than forcing new disruption",
+    "Neptune": "intuition is turned inward right now -- worth trusting your gut today more than surface-level information",
+    "Pluto": "internal power dynamics are worth examining honestly today, more than external control battles",
+}
+
+ECLIPSE_DAY_GUIDANCE = {
+    "solar": "a solar eclipse compresses real new beginnings into a short window -- big potential, genuinely unpredictable, better to stay flexible than lock in rigid plans today",
+    "lunar": "a lunar eclipse tends to bring real emotional culmination -- things that have been building for a while surface, and honesty serves you better than avoidance today",
+}
+
+
+def _blend_vibe_ingredients(ingredients, api_key=None):
+    """
+    Weaves real, pre-written ingredients into one cohesive paragraph via
+    the same invisible-AI pattern already used for question routing --
+    the model is given ONLY the real content below and explicitly
+    instructed not to invent any new astrological claims. It's blending
+    voice and flow, not writing astrology.
+    """
+    import os, json as jsonlib, re, urllib.request
+    key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+    if not key:
+        raise RuntimeError("No Anthropic API key configured")
+
+    bullet_list = "\n".join(f"- {text}" for _, text in ingredients)
+
+    system_prompt = (
+        "You write ONE short, cohesive paragraph (3-5 sentences) advising someone how to "
+        "approach today, based ONLY on the real astrological observations given below.\n\n"
+        "Voice: plain, direct, casual, mellow -- warm but no fluff, no over-explaining. "
+        "Contractions are fine, active voice, dry humor is fine if it fits naturally. "
+        "CRITICAL: never use a contrastive tacked-on clause like 'not X, but Y' or 'not just Z' "
+        "-- this is a specific tell to avoid, not a style choice.\n\n"
+        "Rules:\n"
+        "- Use ONLY the observations given below. Never invent a new astrological claim, "
+        "placement, or aspect that isn't listed.\n"
+        "- Weave them into ONE natural paragraph, not a list, not separate sentences per item.\n"
+        "- End with practical, actionable guidance on how to approach today specifically.\n"
+        "- No greeting, no sign-off, no meta-commentary about being an astrology app.\n\n"
+        f"Real observations to weave together:\n{bullet_list}"
+    )
+
+    payload = jsonlib.dumps({
+        "model": "claude-haiku-4-5-20251001",
+        "max_tokens": 300,
+        "system": system_prompt,
+        "messages": [{"role": "user", "content": "Write today's reading."}],
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages",
+        data=payload,
+        headers={"Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01"},
+    )
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        body = jsonlib.loads(resp.read())
+    return body["content"][0]["text"].strip()
+
+
+def generate_integrated_vibe_of_day(day_result, natal_positions, natal_houses,
+                                     retrogrades_today, eclipse_today, moon_phase_today,
+                                     api_key=None):
+    """
+    The real 'horoscope on steroids' -- gathers every real ingredient
+    (transit why/whats_off, moon phase, active retrogrades, eclipse if
+    any) and blends them into one cohesive, personalized message via
+    the AI layer above. Falls back to the separate why/whats_off
+    structure if the blending call fails, so a network hiccup never
+    breaks the page -- degrades gracefully, doesn't crash.
+    """
+    base_reading = generate_reading(day_result, natal_positions, natal_houses)
+
+    ingredients = []
+    if base_reading["why"]:
+        ingredients.append(("transit_favorable", base_reading["why"]))
+    if base_reading["whats_off"]:
+        ingredients.append(("transit_tense", base_reading["whats_off"]))
+    phase_name = moon_phase_today["phase"]
+    if phase_name in MOON_PHASE_GUIDANCE:
+        ingredients.append(("moon_phase", f"The Moon is in its {phase_name} phase today -- {MOON_PHASE_GUIDANCE[phase_name]}."))
+    for planet in retrogrades_today:
+        if planet in RETROGRADE_DAY_GUIDANCE:
+            ingredients.append((f"retrograde_{planet}", f"{planet} is retrograde right now -- {RETROGRADE_DAY_GUIDANCE[planet]}."))
+    if eclipse_today and eclipse_today["type"] in ECLIPSE_DAY_GUIDANCE:
+        ingredients.append(("eclipse", f"Today's a {eclipse_today['type']} eclipse -- {ECLIPSE_DAY_GUIDANCE[eclipse_today['type']]}."))
+
+    result = {"date": base_reading["date"], "score": base_reading["score"],
+              "ingredients_used": [name for name, _ in ingredients]}
+
+    if not ingredients:
+        result["message"] = "Genuinely quiet day -- nothing standing out either way."
+        return result
+
+    try:
+        result["message"] = _blend_vibe_ingredients(ingredients, api_key)
+    except Exception:
+        # Graceful fallback: real content, just not blended into one
+        # voice -- still accurate, still useful, just less seamless.
+        result["message"] = " ".join(text for _, text in ingredients)
+        result["blend_failed"] = True
+
+    return result
+
+
 def generate_reading(day_result, natal_positions, natal_houses=None):
     """
     Takes one day's result from scan_date_range (score + hits) and returns
-    the three-part structure: verdict, why, whats_off. whats_off is None
-    on a genuinely clean day -- we don't invent tension that isn't there.
-    """
-    score = day_result["score"]
-    hits = day_result["hits"]
+    the two-part structure: why, whats_off. whats_off is None on a
+    genuinely clean day -- we don't invent tension that isn't there.
 
-    if score >= 4:
-        verdict = "Make the most of today!"
-    elif score >= 1:
-        verdict = "Easy day. Nothing dramatic."
-    elif score > -1:
-        verdict = "Wash of a day -- take it or leave it."
-    else:
-        verdict = "Pass on it today."
+    No manufactured verdict line -- a banded score description ("Make the
+    most of today!") doesn't mean anything when the day being described
+    isn't today, which is exactly what happens for "when should I..."
+    questions that scan a date range and land on some future day. The
+    why/whats_off content is the real substance; it doesn't need a
+    heading manufactured on top of it.
+    """
+    hits = day_result["hits"]
 
     favorable_hits = [h for h in hits if h["aspect"] in FAVORABLE]
     tense_hits = [h for h in hits if h["aspect"] in TENSE]
@@ -509,8 +632,8 @@ def generate_reading(day_result, natal_positions, natal_houses=None):
         top_tense = max(tense_hits, key=lambda h: h["weight"])
         whats_off = _phrase_for(top_tense, natal_houses, WHAT_S_OFF_PHRASES)
 
-    return {"date": day_result["date"], "score": score,
-            "verdict": verdict, "why": why, "whats_off": whats_off}
+    return {"date": day_result["date"], "score": day_result["score"],
+            "why": why, "whats_off": whats_off}
 
 
 # --- Question routing (real version) ---------------------------------------
@@ -835,6 +958,82 @@ def compute_void_periods_in_range(start_jd, end_jd):
     return periods
 
 
+RETROGRADE_PLANETS = {
+    "Mercury": swe.MERCURY, "Venus": swe.VENUS, "Mars": swe.MARS,
+    "Jupiter": swe.JUPITER, "Saturn": swe.SATURN, "Uranus": swe.URANUS,
+    "Neptune": swe.NEPTUNE, "Pluto": swe.PLUTO,
+}  # Sun and Moon never appear retrograde from Earth -- excluded
+
+
+def _planet_speed(jd, code):
+    xx, _ = swe.calc_ut(jd, code, FLAGS)
+    return xx[3]
+
+
+def find_retrograde_periods(start_jd, end_jd, coarse_step=0.5):
+    """Every retrograde start/end within a range, for every planet that
+    actually goes retrograde. Detects the speed sign-change (direct <->
+    retrograde) via coarse stepping, refines the exact moment with
+    bisection. A period already in progress at start_jd, or still in
+    progress at end_jd, is reported with that boundary as its edge."""
+    periods = []
+    for name, code in RETROGRADE_PLANETS.items():
+        jd = start_jd
+        prev_speed = _planet_speed(jd, code)
+        jd2 = jd + coarse_step
+        current_start = start_jd if prev_speed < 0 else None
+        while jd2 <= end_jd:
+            cur_speed = _planet_speed(jd2, code)
+            if (prev_speed < 0) != (cur_speed < 0):
+                lo, hi = jd, jd2
+                for _ in range(30):
+                    mid = (lo + hi) / 2
+                    if (_planet_speed(mid, code) < 0) == (prev_speed < 0):
+                        lo = mid
+                    else:
+                        hi = mid
+                if prev_speed < 0:
+                    periods.append({"planet": name, "start_jd": current_start, "end_jd": hi})
+                    current_start = None
+                else:
+                    current_start = hi
+            jd, prev_speed = jd2, cur_speed
+            jd2 += coarse_step
+        if current_start is not None:
+            periods.append({"planet": name, "start_jd": current_start, "end_jd": end_jd})
+    return periods
+
+
+def find_eclipses_in_range(start_jd, end_jd):
+    """Every solar and lunar eclipse within a range, globally visible
+    (not filtered to a specific location -- eclipses matter astrologically
+    regardless of whether they're visible from where you live)."""
+    eclipses = []
+    jd = start_jd
+    while jd < end_jd:
+        try:
+            result = swe.sol_eclipse_when_glob(jd, swe.FLG_MOSEPH, 0, False)
+            eclipse_jd = result[1][0]
+            if eclipse_jd >= end_jd:
+                break
+            eclipses.append({"type": "solar", "jd": eclipse_jd})
+            jd = eclipse_jd + 1
+        except Exception:
+            break
+    jd = start_jd
+    while jd < end_jd:
+        try:
+            result = swe.lun_eclipse_when(jd, swe.FLG_MOSEPH, 0, False)
+            eclipse_jd = result[1][0]
+            if eclipse_jd >= end_jd:
+                break
+            eclipses.append({"type": "lunar", "jd": eclipse_jd})
+            jd = eclipse_jd + 1
+        except Exception:
+            break
+    return sorted(eclipses, key=lambda e: e["jd"])
+
+
 def calendar_range(start_year, start_month, start_day, num_days, natal_positions, natal_houses=None):
     """Full calendar payload for a date range: per-day moon phase and
     notable transits, plus void-of-course windows for the whole range."""
@@ -862,7 +1061,14 @@ def calendar_range(start_year, start_month, start_day, num_days, natal_positions
             "last_aspect": v["last_aspect"],
         })
 
-    return {"days": days, "void_periods": void_periods_out}
+    retro_periods = find_retrograde_periods(start_jd, end_jd)
+    retro_out = [{"planet": r["planet"], "start": jd_to_iso_utc(r["start_jd"]), "end": jd_to_iso_utc(r["end_jd"])} for r in retro_periods]
+
+    eclipses = find_eclipses_in_range(start_jd, end_jd)
+    eclipses_out = [{"type": e["type"], "date": jd_to_iso_utc(e["jd"])[:10]} for e in eclipses]
+
+    return {"days": days, "void_periods": void_periods_out,
+            "retrograde_periods": retro_out, "eclipses": eclipses_out}
 
 
 def compute_astrocartography_lines(jd_ut, lat_range=(-66, 66), lat_step=2):
@@ -2400,6 +2606,27 @@ NAKSHATRAS = [
 ]
 
 
+# Chaldean decan rulers -- each 30-degree sign splits into three 10-degree
+# decans, each ruled by a planet. The rulers follow the traditional
+# repeating Chaldean order (Mars, Sun, Venus, Mercury, Moon, Saturn,
+# Jupiter) starting from each sign's own ruler.
+_DECAN_RULERS = [
+    ["Mars", "Sun", "Venus"], ["Mercury", "Moon", "Saturn"], ["Jupiter", "Mars", "Sun"],
+    ["Venus", "Mercury", "Moon"], ["Saturn", "Jupiter", "Mars"], ["Sun", "Venus", "Mercury"],
+    ["Moon", "Saturn", "Jupiter"], ["Mars", "Sun", "Venus"], ["Mercury", "Moon", "Saturn"],
+    ["Jupiter", "Mars", "Sun"], ["Venus", "Mercury", "Moon"], ["Saturn", "Jupiter", "Mars"],
+]
+
+
+def which_decan(longitude):
+    """Which third of the sign (0-9.99, 10-19.99, 20-29.99 degrees) and
+    that decan's traditional ruling planet."""
+    sign_index = int((longitude % 360) // 30)
+    degree_in_sign = longitude % 30
+    decan_index = int(degree_in_sign // 10)  # 0, 1, or 2
+    return {"decan": decan_index + 1, "ruler": _DECAN_RULERS[sign_index][decan_index]}
+
+
 def which_nakshatra(sidereal_longitude):
     """27 lunar-mansion divisions of 13°20' each, starting at 0° sidereal Aries.
     Only meaningful for sidereal (Vedic) longitudes -- passing a tropical
@@ -2417,16 +2644,60 @@ def compute_part_of_fortune(sun_lon, moon_lon, asc_lon, is_day_chart):
     return (asc_lon + sun_lon - moon_lon) % 360
 
 
+def _shift_point(point, offset):
+    """Re-express one longitude-bearing point (with sign/degree_in_sign)
+    shifted by offset degrees, recomputing sign and degree together so
+    they never go stale relative to the new longitude."""
+    new_lon = (point["longitude"] - offset) % 360
+    sign, deg = deg_to_sign(new_lon)
+    point["longitude"] = round(new_lon, 4)
+    point["sign"] = sign
+    point["degree_in_sign"] = deg
+
+
+def _apply_draconic_shift(result, offset):
+    """Shift every longitude in a computed chart by `offset` degrees --
+    the mechanism behind the Draconic chart, where offset is the natal
+    North Node's own tropical longitude, making the Node the 0-degree
+    reference point instead of the vernal equinox."""
+    for name, data in result["positions"].items():
+        if name == "_skipped":
+            continue
+        _shift_point(data, offset)
+
+    if result["houses_and_angles"]:
+        for house_system in ["placidus", "whole_sign"]:
+            hs = result["houses_and_angles"][house_system]
+            _shift_point(hs["ascendant"], offset)
+            _shift_point(hs["midheaven"], offset)
+            _shift_point(hs["vertex"], offset)
+            for h in hs["houses"]:
+                abs_lon = SIGNS.index(h["sign"]) * 30 + h["degree_in_sign"]
+                new_lon = (abs_lon - offset) % 360
+                sign, deg = deg_to_sign(new_lon)
+                h["sign"], h["degree_in_sign"] = sign, deg
+
+    if result["part_of_fortune"]:
+        _shift_point(result["part_of_fortune"], offset)
+
+    return result
+
+
 def compute_chart(year, month, day, hour, minute, lat, lon, unknown_time=False, chart_system="western"):
     """
     Main entry point. Caller supplies LOCAL birth date/time + coordinates —
     the correct historical UTC offset is resolved automatically.
 
-    chart_system: "western" (tropical zodiac, Placidus/Whole Sign choice)
-    or "vedic" (sidereal zodiac using the Lahiri ayanamsa, Whole Sign
-    houses by standard convention, includes each planet's Nakshatra).
+    chart_system: "western" (tropical zodiac, Placidus/Whole Sign choice),
+    "vedic" (sidereal zodiac using the Lahiri ayanamsa, Whole Sign houses
+    by standard convention, includes each planet's Nakshatra), or
+    "draconic" (the natal North Node re-expressed as the 0-degree
+    reference point instead of the vernal equinox -- computed as a full
+    tropical chart, then shifted by the Node's own tropical longitude;
+    associated with soul-purpose and karmic themes, typically read
+    alongside a regular natal chart rather than instead of it).
     These are genuinely different systems, not a label swap -- the
-    underlying positions differ by the ayanamsa amount (currently ~24°).
+    underlying positions differ by real, distinct amounts.
 
     If unknown_time=True, defaults to noon local and omits houses/angles/
     Part of Fortune/vertex (all meaningless without an exact birth time)
@@ -2476,5 +2747,19 @@ def compute_chart(year, month, day, hour, minute, lat, lon, unknown_time=False, 
         result["part_of_fortune"] = {"longitude": round(pof_lon, 4), "sign": pof_sign, "degree_in_sign": pof_deg}
         if chart_system == "vedic":
             result["part_of_fortune"]["nakshatra"] = which_nakshatra(pof_lon)
+
+    if chart_system == "draconic":
+        # The whole chart above was computed tropically (draconic isn't a
+        # zodiac variant at the calc_ut level like sidereal is -- it's a
+        # shift applied AFTER, using this chart's own North Node).
+        node_lon = positions["North Node"]["longitude"]
+        result = _apply_draconic_shift(result, node_lon)
+
+    for name, data in result["positions"].items():
+        if name == "_skipped":
+            continue
+        data["decan"] = which_decan(data["longitude"])
+    if result["part_of_fortune"]:
+        result["part_of_fortune"]["decan"] = which_decan(result["part_of_fortune"]["longitude"])
 
     return result

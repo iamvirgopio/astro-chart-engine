@@ -151,6 +151,30 @@ class SynastryRequest(BaseModel):
     label_b: str = "B"
 
 
+class CalendarRangeRequest(BaseModel):
+    start_year: int
+    start_month: int = Field(ge=1, le=12)
+    start_day: int = Field(ge=1, le=31)
+    num_days: int = Field(ge=1, le=90, default=31)
+    natal_positions: dict
+    natal_houses: list | None = None
+
+
+@app.post("/calendar-range")
+def get_calendar_range(req: CalendarRangeRequest):
+    """Moon phases, void-of-course windows, and notable transits against
+    this specific chart, for a date range -- the data layer for the
+    calendar/planner feature."""
+    try:
+        result = ce.calendar_range(
+            start_year=req.start_year, start_month=req.start_month, start_day=req.start_day,
+            num_days=req.num_days, natal_positions=req.natal_positions, natal_houses=req.natal_houses,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return result
+
+
 @app.post("/synastry")
 def get_synastry(req: SynastryRequest):
     """Every aspect between two charts' planets -- relationship or founder/business comparison."""

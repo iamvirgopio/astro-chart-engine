@@ -83,9 +83,10 @@ class VibeOfDayRequest(BaseModel):
 @app.post("/vibe-of-day")
 def get_vibe_of_day(req: VibeOfDayRequest):
     """
-    Today's single reading, no question needed -- scans just today
-    against the natal chart and returns the same verdict/why/whats_off
-    structure used everywhere else, so the frontend renders it the same way.
+    The real integrated 'horoscope on steroids' -- today's transits,
+    retrogrades, eclipse (if any), and moon phase, genuinely blended
+    into one cohesive, personalized message via the AI-layer-on-top-of-
+    real-content pattern.
     """
     from datetime import date
     today = date.today()
@@ -97,7 +98,21 @@ def get_vibe_of_day(req: VibeOfDayRequest):
             today_positions, req.natal_chart["positions"], "timing", natal_houses
         )
         day_result = {"date": today.isoformat(), "score": score, "hits": hits}
-        reading = ce.generate_reading(day_result, req.natal_chart["positions"], natal_houses)
+
+        retrogrades_today = [
+            name for name, data in today_positions.items()
+            if name != "_skipped" and name in ce.RETROGRADE_PLANETS and data.get("retrograde")
+        ]
+
+        eclipses_today = ce.find_eclipses_in_range(jd_ut - 0.5, jd_ut + 0.5)
+        eclipse_today = eclipses_today[0] if eclipses_today else None
+
+        moon_phase_today = ce.moon_phase(jd_ut)
+
+        reading = ce.generate_integrated_vibe_of_day(
+            day_result, req.natal_chart["positions"], natal_houses,
+            retrogrades_today, eclipse_today, moon_phase_today,
+        )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     return reading

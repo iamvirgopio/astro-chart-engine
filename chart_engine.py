@@ -729,15 +729,87 @@ def route_with_confidence(question_text, classify_fn=classify_question_live):
 
 
 # --- Full pipeline ----------------------------------------------------------
+def generate_integrated_question_reading(top_day, natal_positions, natal_houses, question_text, api_key=None):
+    """
+    Same real-content-plus-blending pattern as the integrated vibe of
+    day, applied here to fix a real gap: the why/whats_off phrases were
+    written as general astrology facts, with nothing in the text
+    actually connecting them to whatever the person specifically asked.
+    The lens influences which day and which hit gets surfaced, but never
+    touched the wording -- this does, using ONLY the real observations
+    already generated, never inventing new astrology.
+    """
+    base_reading = generate_reading(top_day, natal_positions, natal_houses)
+
+    ingredients = []
+    if base_reading["why"]:
+        ingredients.append(("favorable", base_reading["why"]))
+    if base_reading["whats_off"]:
+        ingredients.append(("tense", base_reading["whats_off"]))
+
+    result = {"date": base_reading["date"], "score": base_reading["score"]}
+
+    if not ingredients:
+        result["message"] = f"Nothing especially strong stands out astrologically for {base_reading['date']} either way -- a fairly neutral window for this."
+        return result
+
+    try:
+        bullet_list = "\n".join(f"- {text}" for _, text in ingredients)
+        import os, json as jsonlib, urllib.request
+        key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+        if not key:
+            raise RuntimeError("No Anthropic API key configured")
+
+        system_prompt = (
+            "You are answering someone's specific question using ONLY the real astrological "
+            "observations given below, for a specific date already identified as the best match.\n\n"
+            "Voice: plain, direct, casual, mellow -- warm but no fluff, no over-explaining. "
+            "Contractions are fine, active voice. CRITICAL: never use a contrastive tacked-on "
+            "clause like 'not X, but Y' or 'not just Z', and never set up an explicit "
+            "myth-vs-fact or 'here's what's true / here's what isn't' structure -- write "
+            "naturally instead.\n\n"
+            "Rules:\n"
+            "- Use ONLY the observations given below. Never invent a new astrological claim, "
+            "placement, or aspect that isn't listed.\n"
+            "- Explicitly connect the observations to what they actually asked -- don't just "
+            "restate the astrology in isolation.\n"
+            "- Reference the date naturally in your answer, since they want to know when.\n"
+            "- Write 2-4 sentences, one cohesive answer, not a list.\n"
+            "- No greeting, no sign-off, no meta-commentary about being an astrology app.\n\n"
+            f"They asked: \"{question_text}\"\n"
+            f"The best-matching date found: {base_reading['date']}\n\n"
+            f"Real observations for that date:\n{bullet_list}"
+        )
+        payload = jsonlib.dumps({
+            "model": "claude-haiku-4-5-20251001",
+            "max_tokens": 300,
+            "system": system_prompt,
+            "messages": [{"role": "user", "content": "Answer the question."}],
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            "https://api.anthropic.com/v1/messages",
+            data=payload,
+            headers={"Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01"},
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            body = jsonlib.loads(resp.read())
+        result["message"] = body["content"][0]["text"].strip()
+    except Exception:
+        result["message"] = " ".join(text for _, text in ingredients)
+        result["blend_failed"] = True
+
+    return result
+
+
 def handle_question(question_text, natal_chart, lat, lon,
                      start_year, start_month, start_day, num_days=30,
-                     classify_fn=classify_question_live, house_system="placidus"):
+                     classify_fn=classify_question_live, house_system="placidus", api_key=None):
     """
     The single entry point tying every piece together: routes the
     question, and if confident, scans the date range through that lens
-    and returns a fully assembled reading. If not confident, returns
-    the clarify-screen instruction instead so the app can show the
-    tappable options -- never a guessed answer.
+    and returns a fully assembled, genuinely connected reading. If not
+    confident, returns the clarify-screen instruction instead so the
+    app can show the tappable options -- never a guessed answer.
     """
     routing = route_with_confidence(question_text, classify_fn)
     if routing["action"] == "show_clarify":
@@ -750,7 +822,7 @@ def handle_question(question_text, natal_chart, lat, lon,
         lat, lon, lens=routing["lens"], natal_houses=natal_houses,
     )
     top_day = results[0]
-    reading = generate_reading(top_day, natal_chart["positions"], natal_houses)
+    reading = generate_integrated_question_reading(top_day, natal_chart["positions"], natal_houses, question_text, api_key=api_key)
     return {"action": "show_reading", "lens": routing["lens"],
             "question": question_text, "reading": reading}
 

@@ -568,7 +568,8 @@ def handle_question(question_text, natal_chart, lat, lon,
     if routing["action"] == "show_clarify":
         return routing
 
-    natal_houses = natal_chart["houses_and_angles"][house_system]["houses"]
+    houses_and_angles = natal_chart.get("houses_and_angles")
+    natal_houses = houses_and_angles[house_system]["houses"] if houses_and_angles else None
     results = scan_date_range(
         natal_chart["positions"], start_year, start_month, start_day, num_days,
         lat, lon, lens=routing["lens"], natal_houses=natal_houses,

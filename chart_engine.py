@@ -537,6 +537,21 @@ def _blend_ingredients_into_answer(ingredients, task_instruction, question_conte
         "CRITICAL: never use a contrastive tacked-on clause like 'not X, but Y' or 'not just Z', "
         "and never set up an explicit myth-vs-fact or 'here's what's true / here's what isn't' "
         "structure -- these are specific tells to avoid, not style choices.\n\n"
+        "ABSOLUTE RULE, more important than anything else in this prompt: you may state ONLY "
+        "facts that appear explicitly in the observations below. Not a similar fact, not a "
+        "plausible-sounding fact, not a fact a real astrologer might reasonably infer -- ONLY "
+        "what is written below, word for substance. This applies to every category of fact "
+        "equally: dates, timeframes, durations, outcomes, numbers, names, or anything else. "
+        "Astrology writing has a strong habitual pull toward narrating when tension 'eases,' "
+        "'loosens,' 'passes,' or 'resolves' -- you must resist that pull completely. If a "
+        "specific date is given below, that is the ONLY date that may appear anywhere in your "
+        "answer, and you may not imply any OTHER date, month, or timeframe exists, including "
+        "vague ones like 'in a few weeks,' 'by next month,' or 'once this settles.' Describe "
+        "tension only as it stands on the given date -- never as something with a future "
+        "resolution point you were not given. Concretely: if told '[X] is squaring [Y] -- "
+        "friction, more annoying than serious,' you may say the friction exists and how to "
+        "handle it right now -- you may NOT say when it will ease, even by a vague amount of "
+        "time, because you were never given that information and do not have it.\n\n"
         "Rules:\n"
         "- Use ONLY the observations given below. Never invent a new astrological claim, "
         "placement, or aspect that isn't listed.\n"
@@ -544,7 +559,8 @@ def _blend_ingredients_into_answer(ingredients, task_instruction, question_conte
         "per item, not 'for you specifically' / 'for them' split out as separate parts.\n"
         + (f"- Directly answer what they actually asked -- don't just restate the astrology in "
            f"isolation.\n" if question_context else "")
-        + "- End with practical, actionable guidance.\n"
+        + "- End with practical, actionable guidance grounded only in what's given -- guidance "
+        "about HOW to approach it, never WHEN it changes, unless that timing was given to you.\n"
         "- No greeting, no sign-off, no meta-commentary about being an astrology app.\n\n"
         f"{question_block}"
         f"Real observations to weave together:\n{bullet_list}"
@@ -553,7 +569,7 @@ def _blend_ingredients_into_answer(ingredients, task_instruction, question_conte
     payload = jsonlib.dumps({
         "model": "claude-haiku-4-5-20251001",
         "max_tokens": 300,
-        "temperature": 0.4,
+        "temperature": 0.2,
         "system": system_prompt,
         "messages": [{"role": "user", "content": "Write the reading."}],
     }).encode("utf-8")
@@ -1123,7 +1139,11 @@ def calendar_range(start_year, start_month, start_day, num_days, natal_positions
         })
 
     retro_periods = find_retrograde_periods(start_jd, end_jd)
-    retro_out = [{"planet": r["planet"], "start": jd_to_iso_utc(r["start_jd"]), "end": jd_to_iso_utc(r["end_jd"])} for r in retro_periods]
+    retro_out = [
+        {"planet": r["planet"], "start": jd_to_iso_utc(r["start_jd"]), "end": jd_to_iso_utc(r["end_jd"]),
+         "guidance": RETROGRADE_DAY_GUIDANCE.get(r["planet"])}
+        for r in retro_periods
+    ]
 
     eclipses = find_eclipses_in_range(start_jd, end_jd)
     eclipses_out = [{"type": e["type"], "date": jd_to_iso_utc(e["jd"])[:10]} for e in eclipses]

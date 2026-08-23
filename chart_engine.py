@@ -975,6 +975,54 @@ def void_of_course_period(jd_ref):
     }
 
 
+CHALDEAN_ORDER = ["Saturn", "Jupiter", "Mars", "Sun", "Venus", "Mercury", "Moon"]
+_PLANETARY_DAY_RULERS = {6: "Sun", 0: "Moon", 1: "Mars", 2: "Mercury", 3: "Jupiter", 4: "Venus", 5: "Saturn"}
+# Python's date.weekday(): Monday=0 ... Sunday=6
+
+
+def _get_sun_events(jd_midnight_utc, lat, lon):
+    """Real sunrise, sunset, and next sunrise for a given local calendar
+    day, at a specific location. Verified during testing: searching for
+    sunset from midnight UTC can find the tail end of the PREVIOUS local
+    day's sunset instead of the one after that morning's sunrise --
+    fixed by searching for sunset starting from the sunrise time itself,
+    not from midnight."""
+    geopos = (lon, lat, 0)
+    sunrise = swe.rise_trans(jd_midnight_utc, swe.SUN, swe.CALC_RISE, geopos)[1][0]
+    sunset = swe.rise_trans(sunrise, swe.SUN, swe.CALC_SET, geopos)[1][0]
+    next_sunrise = swe.rise_trans(sunset, swe.SUN, swe.CALC_RISE, geopos)[1][0]
+    return sunrise, sunset, next_sunrise
+
+
+def compute_planetary_hours(year, month, day, lat, lon):
+    """The traditional 24-hour planetary hour system: sunrise-to-sunset
+    split into 12 equal 'day hours', sunset-to-next-sunrise split into 12
+    equal 'night hours', each ruled by a planet in the Chaldean order,
+    starting with that weekday's own traditional ruling planet."""
+    import datetime
+    jd_midnight = julian_day_utc(year, month, day, 0, 0, 0)
+    weekday = datetime.date(year, month, day).weekday()
+    sunrise, sunset, next_sunrise = _get_sun_events(jd_midnight, lat, lon)
+
+    day_hour_length = (sunset - sunrise) / 12
+    night_hour_length = (next_sunrise - sunset) / 12
+    ruler = _PLANETARY_DAY_RULERS[weekday]
+    start_index = CHALDEAN_ORDER.index(ruler)
+
+    hours = []
+    for i in range(12):
+        start = sunrise + i * day_hour_length
+        planet = CHALDEAN_ORDER[(start_index + i) % 7]
+        hours.append({"hour": i + 1, "type": "day", "start": jd_to_iso_utc(start), "end": jd_to_iso_utc(start + day_hour_length), "planet": planet})
+    for i in range(12):
+        start = sunset + i * night_hour_length
+        planet = CHALDEAN_ORDER[(start_index + 12 + i) % 7]
+        hours.append({"hour": i + 1, "type": "night", "start": jd_to_iso_utc(start), "end": jd_to_iso_utc(start + night_hour_length), "planet": planet})
+
+    return {"sunrise": jd_to_iso_utc(sunrise), "sunset": jd_to_iso_utc(sunset),
+            "next_sunrise": jd_to_iso_utc(next_sunrise), "day_ruler": ruler, "hours": hours}
+
+
 def jd_to_iso_utc(jd):
     """Convert a Julian Day (UT) to a readable ISO 8601 UTC string."""
     year, month, day, hour_decimal = swe.revjul(jd)

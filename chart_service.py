@@ -206,6 +206,25 @@ class ClassifyQuestionRequest(BaseModel):
     context_description: str
 
 
+class BlendAnswerRequest(BaseModel):
+    ingredients: list[list[str]]  # [[label, text], [label, text], ...]
+    question: str
+
+
+@app.post("/blend-answer")
+def get_blended_answer(req: BlendAnswerRequest):
+    """Generic blending endpoint -- used by any surface whose real
+    content library lives on the frontend (synastry, location) rather
+    than in this engine. Takes real ingredients, returns one direct,
+    cohesive answer to the actual question asked."""
+    try:
+        ingredient_tuples = [(item[0], item[1]) for item in req.ingredients]
+        message = ce.blend_answer(ingredient_tuples, req.question)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"message": message}
+
+
 @app.post("/classify-question")
 def classify_question_endpoint(req: ClassifyQuestionRequest):
     """General-purpose free-text classifier, reused for synastry and

@@ -505,14 +505,14 @@ ECLIPSE_DAY_GUIDANCE = {
 }
 
 
-def _blend_ingredients_into_answer(ingredients, task_instruction, question_context=None, api_key=None):
+def _blend_ingredients_into_answer(ingredients, task_instruction, question_context=None, api_key=None, sentence_range="2-5", max_tokens=300):
     """
     THE single shared blending function for every question-answering
     surface in the app -- vibe of day, the main reading engine, synastry
-    questions, location questions. One place for the voice rules and the
-    "never invent new astrology" constraint, so every surface stays
-    consistent instead of drifting apart across separately-hand-written
-    versions.
+    questions, location questions, the lookbook. One place for the voice
+    rules and the "never invent new astrology" constraint, so every
+    surface stays consistent instead of drifting apart across
+    separately-hand-written versions.
 
     ingredients: list of (label, text) tuples -- real, pre-written content only.
     task_instruction: what this specific call needs to accomplish (e.g.
@@ -520,6 +520,12 @@ def _blend_ingredients_into_answer(ingredients, task_instruction, question_conte
         their specific question about this connection").
     question_context: the actual question text, if this is answering one
         (omit for vibe of day, which isn't answering a typed question).
+    sentence_range / max_tokens: most callers want the default short
+        reading length; a few (like the lookbook, which needs genuinely
+        detailed output covering hair, makeup, outfit, and accessories)
+        need real room to actually be detailed -- override both together
+        so the length instruction and the token ceiling stay consistent
+        with each other.
     """
     import os, json as jsonlib, urllib.request
     key = api_key or os.environ.get("ANTHROPIC_API_KEY")
@@ -530,8 +536,8 @@ def _blend_ingredients_into_answer(ingredients, task_instruction, question_conte
     question_block = f'They asked: "{question_context}"\n\n' if question_context else ""
 
     system_prompt = (
-        f"You write ONE short, cohesive paragraph (2-5 sentences) {task_instruction}, "
-        "based ONLY on the real astrological observations given below.\n\n"
+        f"You write ONE cohesive answer ({sentence_range} sentences) {task_instruction}, "
+        "based ONLY on the real observations given below.\n\n"
         "Voice: plain, direct, casual, mellow -- warm but no fluff, no over-explaining. "
         "Contractions are fine, active voice, dry humor is fine if it fits naturally. "
         "CRITICAL: never use a contrastive tacked-on clause like 'not X, but Y' or 'not just Z', "
@@ -553,22 +559,22 @@ def _blend_ingredients_into_answer(ingredients, task_instruction, question_conte
         "handle it right now -- you may NOT say when it will ease, even by a vague amount of "
         "time, because you were never given that information and do not have it.\n\n"
         "Rules:\n"
-        "- Use ONLY the observations given below. Never invent a new astrological claim, "
-        "placement, or aspect that isn't listed.\n"
-        "- Weave them into ONE natural paragraph, not a list, not separate labeled sentences "
-        "per item, not 'for you specifically' / 'for them' split out as separate parts.\n"
-        + (f"- Directly answer what they actually asked -- don't just restate the astrology in "
-           f"isolation.\n" if question_context else "")
+        "- Use ONLY the observations given below. Never invent a new claim, detail, or "
+        "specific that isn't listed.\n"
+        "- Weave them into ONE natural, flowing answer, not a list, not separate labeled "
+        "sentences per item.\n"
+        + (f"- Directly answer what they actually asked -- don't just restate the observations "
+           f"in isolation.\n" if question_context else "")
         + "- End with practical, actionable guidance grounded only in what's given -- guidance "
         "about HOW to approach it, never WHEN it changes, unless that timing was given to you.\n"
-        "- No greeting, no sign-off, no meta-commentary about being an astrology app.\n\n"
+        "- No greeting, no sign-off, no meta-commentary about being an app.\n\n"
         f"{question_block}"
         f"Real observations to weave together:\n{bullet_list}"
     )
 
     payload = jsonlib.dumps({
         "model": "claude-haiku-4-5-20251001",
-        "max_tokens": 300,
+        "max_tokens": max_tokens,
         "temperature": 0.2,
         "system": system_prompt,
         "messages": [{"role": "user", "content": "Write the reading."}],
@@ -2708,22 +2714,29 @@ def recommend_locations(jd_ut, theme_planets, theme_lines=None, top_n=5, orb_deg
 # calculation needed here, just cross-referencing chart_a's positions
 # against chart_b's using the same find_aspect() logic used for transits.
 
-def blend_answer(ingredients, question_text, api_key=None):
+def blend_answer(ingredients, question_text, api_key=None, detailed=False):
     """
     Generic blending entry point for surfaces where the real content
     library lives on the FRONTEND (synastry's 78-pair library, location's
-    advice banks) rather than in this engine -- takes whatever real
-    ingredients that page already gathered and blends them into one
-    direct answer, without needing the astrology content duplicated
-    server-side. Same shared voice rules as every other blending call.
+    advice banks, the lookbook's Venus style archetypes) rather than in
+    this engine -- takes whatever real ingredients that page already
+    gathered and blends them into one direct answer, without needing the
+    content duplicated server-side. Same shared voice rules as every
+    other blending call.
+
+    detailed=True gives real room for something that's supposed to be
+    genuinely thorough (like the lookbook's "down to the accessories"
+    requirement) instead of the default short-reading length.
     """
     if not ingredients:
         raise ValueError("No ingredients given to blend")
+    kwargs = {"sentence_range": "6-10", "max_tokens": 700} if detailed else {}
     return _blend_ingredients_into_answer(
         ingredients,
         task_instruction="directly answering their specific question",
         question_context=question_text,
         api_key=api_key,
+        **kwargs,
     )
 
 

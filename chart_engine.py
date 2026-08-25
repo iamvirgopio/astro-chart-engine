@@ -551,73 +551,39 @@ def _blend_ingredients_into_answer(ingredients, task_instruction, question_conte
         "step. If the observations below feel thin for a given request, make the strongest "
         "reading you can from what's actually there rather than declining to answer -- there is "
         "always enough to say something real.\n\n"
-        "Voice: plain, direct, casual, mellow -- warm but no fluff, no over-explaining. "
-        "Contractions are fine, active voice, dry humor is fine if it fits naturally. "
-        "CRITICAL, and worth being explicit about since narrower versions of this instruction "
-        "keep getting worked around in different surface wording: never define something by "
-        "rejecting an alternative first. This is ONE underlying rhetorical move that shows up in "
-        "many different textual disguises, and ALL of them are banned, not just the most obvious "
-        "phrasing -- 'not X, but Y', 'no X, all Y', 'not just Z', 'you're not X, you're Y', "
-        "'you're not X, you're simply Y', 'instead of X', 'rather than X'. If you notice yourself "
-        "about to write a rejected state before the real one -- ANY phrasing where you name "
-        "something the reader supposedly ISN'T or DOESN'T, before saying what they are or should "
-        "do -- stop and write only the real, positive statement directly. Say what something IS, "
-        "never what it isn't on the way there. Same for an explicit myth-vs-fact or 'here's what's "
-        "true / here's what isn't' structure -- banned in any phrasing, not just that literal one.\n\n"
-        "Also stop after stating a thing -- don't follow it with a trailing clause explaining what "
-        "it accomplishes, why it works, or how it reads to other people. Real feedback on exactly "
-        "this: 'a precise wing of liner that does the work' should have stopped at 'a precise wing "
-        "of liner' -- the trailing 'that does the work' explains the effect instead of just stating "
-        "the thing and trusting it to land. Same failure in longer form: 'the whole effect is quiet "
-        "power, which reads as effortlessly composed to everyone around you, and that's exactly the "
-        "confidence you'll want' -- three separate layers of the same sentence explaining its own "
-        "significance. State the thing. Stop. Do not narrate what it means, signals, or achieves.\n\n"
-        "Also plain text only -- this is displayed as-is, with no markdown rendering. Never use "
-        "asterisks, underscores, or any other markdown syntax for emphasis or formatting; if "
-        "something needs emphasis, say it plainly or restructure the sentence instead.\n\n"
+        "Voice: write the way a Virgo Sun with a Scorpio Venus actually talks. Virgo means "
+        "exacting and detailed, but it never pads -- it doesn't over-explain, doesn't narrate its "
+        "own reasoning out loud, doesn't follow a statement with commentary on what the statement "
+        "means. It just says the true, specific thing and trusts the reader to get it. Scorpio "
+        "Venus means real warmth underneath that precision -- not gushing, not performing "
+        "enthusiasm, but genuine heat when something calls for it, and comfortable with a touch "
+        "of sensuality or edge when the moment is right. Detailed but concise. Direct. Warm where "
+        "warmth is earned, a little charged where that's earned too. Say the thing. Let it land.\n\n"
+        "Plain text only -- this is displayed as-is, with no markdown rendering. Never use "
+        "asterisks, underscores, or any other markdown syntax for emphasis; if something needs "
+        "emphasis, say it plainly.\n\n"
         "ABSOLUTE RULE, more important than anything else in this prompt: for ASTROLOGY "
         "specifically -- placements, aspects, transits, dates, timeframes -- you may state ONLY "
-        "facts that appear explicitly in the observations below. Not a similar fact, not a "
-        "plausible-sounding fact, not a fact a real astrologer might reasonably infer -- ONLY "
-        "what is written below, word for substance. This applies to every category of astrological "
-        "fact equally: dates, timeframes, durations, outcomes, numbers, names, or anything else. "
-        "This rule is about astrology only -- it does NOT restrict general world knowledge like "
-        "facts about a real place someone mentioned (climate, culture, geography), which you're "
-        "separately, explicitly allowed to draw on below when relevant. Astrology writing has a "
-        "strong habitual pull toward narrating when tension 'eases,' "
-        "'loosens,' 'passes,' or 'resolves' -- you must resist that pull completely. If a "
-        "specific date is given below, that is the ONLY date that may appear anywhere in your "
-        "answer, and you may not imply any OTHER date, month, or timeframe exists, including "
-        "vague ones like 'in a few weeks,' 'by next month,' or 'once this settles.' Describe "
-        "tension only as it stands on the given date -- never as something with a future "
-        "resolution point you were not given. Concretely: if told '[X] is squaring [Y] -- "
-        "friction, more annoying than serious,' you may say the friction exists and how to "
-        "handle it right now -- you may NOT say when it will ease, even by a vague amount of "
-        "time, because you were never given that information and do not have it.\n\n"
+        "facts that appear explicitly in the observations below, word for substance. This rule is "
+        "about astrology only -- it does NOT restrict general world knowledge like facts about a "
+        "real place someone mentioned, which you're separately, explicitly allowed to draw on "
+        "below when relevant. If a specific date is given below, that is the ONLY date that may "
+        "appear anywhere in your answer -- never a vague future timeframe like 'in a few weeks' "
+        "or 'once this settles' that wasn't actually given to you.\n\n"
         "Rules:\n"
         "- Use ONLY the observations given below. Never invent a new astrological claim, "
         "placement, or aspect that isn't listed.\n"
-        "- Before writing anything, decide the ONE actual point you're making -- if someone asked "
-        "you this out loud and you had ten seconds to answer, what's the one real thing you'd "
-        "say? Write THAT. Structuring your paragraph as a tour through each observation in turn "
-        "('X means... your Y also means... and Z suggests...') produces a stitched-together, "
-        "cherry-picked feeling even when every individual sentence is well-written -- because the "
-        "structure itself is a list wearing paragraph clothing, not a real synthesis. A genuinely "
-        "good answer often uses fewer than half the observations below, because most of what's "
-        "given won't actually serve the one point being made -- that's expected, not a failure to "
-        "use your material.\n"
+        "- Decide the ONE actual point you're making before you write -- what's the one real "
+        "thing worth saying here? A genuinely good answer often uses fewer than half the "
+        "observations below, because most of what's given won't serve that one point -- that's "
+        "expected, not a failure to use your material.\n"
         "- Don't open by restating a placement that's already been given as established context "
-        "(e.g. if told 'their Venus is in Scorpio' as a framing fact, don't open with 'your Venus "
-        "in Scorpio is...' -- that's usually already visible on the screen this is displayed on, "
-        "so restating it reads as filler, not insight). Start from the actual guidance instead.\n"
+        "(e.g. if told 'their Venus is in Scorpio' as a framing fact, that's usually already "
+        "visible on the screen this is displayed on -- start from the actual guidance instead).\n"
         + (f"- Directly answer what they actually asked -- don't just restate the astrology in "
            f"isolation.\n"
-           f"- If an observation doesn't genuinely relate to what they asked, don't force it into "
-           f"the answer just because it was given to you -- weave together only the ones that "
-           f"actually help answer the question, even if that means using fewer than all of them. "
-           f"A technically-true but off-topic astrological fact (e.g. a transit touching an area of "
-           f"life that has nothing to do with what they're asking) does not belong in the answer just "
-           f"because it happened to be strong or exact.\n" if question_context else "")
+           f"- If an observation doesn't genuinely relate to what they asked, leave it out rather "
+           f"than forcing it in just because it was given to you.\n" if question_context else "")
         + "- End with practical, actionable guidance grounded only in what's given -- guidance "
         "about HOW to approach it, never WHEN it changes, unless that timing was given to you.\n"
         "- No greeting, no sign-off, no meta-commentary about being an astrology app.\n"
@@ -625,15 +591,13 @@ def _blend_ingredients_into_answer(ingredients, task_instruction, question_conte
             "- If the question mentions a specific real place by name, use your own knowledge of "
             "it first -- for well-known places, you likely already know enough about climate, "
             "culture, and what people typically wear there. Only use the web_search tool if you "
-            "genuinely aren't confident about that place specifically (a less-famous location, or "
-            "something where being wrong would actually matter to the advice). Don't search "
-            "reflexively just because a place was mentioned.\n"
+            "genuinely aren't confident about that place specifically. Don't search reflexively "
+            "just because a place was mentioned.\n"
             "- If the occasion genuinely spans multiple distinct contexts (e.g. a multi-day trip "
             "that plausibly involves a beach day, an evening out, and casual daytime wear), it's "
             "fine to offer 2-3 clearly labeled distinct looks instead of forcing everything into "
-            "one. If the occasion is a single specific event, give ONE cohesive look -- don't "
-            "manufacture extra looks a single occasion doesn't call for. Judge this per request; "
-            "there's no fixed rule for when to split it into more than one.\n"
+            "one. If the occasion is a single specific event, give ONE cohesive look. Judge this "
+            "per request; there's no fixed rule for when to split it into more than one.\n"
             if allow_web_search else ""
         )
         + "\n"
@@ -675,38 +639,22 @@ def _blend_ingredients_into_answer(ingredients, task_instruction, question_conte
     # visible tell in its own right. Only strips single/double
     # asterisks and underscores used as emphasis wrapping a word or
     # phrase -- doesn't touch genuine mid-word characters like in a
-    # variable name, which this content never contains anyway.
+    # variable name, which this content never contains anyway. This is
+    # a rendering fix, not a tone edit -- it doesn't touch the model's
+    # actual wording, just formatting syntax the display can't render.
     import re as _re
     raw_text = _re.sub(r'\*{1,2}([^*\n]+?)\*{1,2}', r'\1', raw_text)
     raw_text = _re.sub(r'(?<!\w)_{1,2}([^_\n]+?)_{1,2}(?!\w)', r'\1', raw_text)
 
-    # Deterministic AI-tell filter, moved here (was frontend-only, and
-    # only in Lookbook) after direct evidence across several rounds
-    # that prompt instructions alone don't reliably stop the model from
-    # reaching for these constructions, in one surface-wording disguise
-    # or another. Living here instead means it applies to every single
-    # caller of this shared function, not just the one surface that
-    # happened to get complaints. Every pattern below was tested against
-    # real sentences taken directly from actual flagged output before
-    # being trusted, plus control sentences confirming it doesn't
-    # falsely strip legitimate, differently-structured text.
-    raw_text = _re.sub(r'\b(no|nothing)\s+[a-z]+(\s+[a-z]+){0,2}\s*,\s*(no|nothing)\s+[a-z]+(\s+[a-z]+){0,2}\b\.?', '', raw_text, flags=_re.IGNORECASE)
-    raw_text = _re.sub(r',\s*nothing\s+[a-z]+(\s+[a-z]+){0,3}(?=[.!?])', '', raw_text, flags=_re.IGNORECASE)
-    raw_text = _re.sub(r",?\s*(so\s+)?there('s| is) no room for\s+[^,.!?]+", '', raw_text, flags=_re.IGNORECASE)
-    raw_text = _re.sub(r',\s*not\s+[^.!?]+(?=[.!?])', '', raw_text, flags=_re.IGNORECASE)
-    raw_text = _re.sub(r"\b(and|but)\s+you('re| are)\s+not\s+[^.!?]+(?=[.!?])", '', raw_text, flags=_re.IGNORECASE)
-    raw_text = _re.sub(r'\s+rather than\s+[^,.!?]+', '', raw_text, flags=_re.IGNORECASE)
-    raw_text = _re.sub(r',?\s*without\s+[^,.!?]+', '', raw_text, flags=_re.IGNORECASE)
-    raw_text = _re.sub(r",?\s*which (is|reads as|means|signals)\s+(exactly\s+)?[^.!?]+", '', raw_text, flags=_re.IGNORECASE)
-    raw_text = _re.sub(r"\s*That('s| is) (how|what|exactly)\s+[^.!?]+[.!?]", '', raw_text, flags=_re.IGNORECASE)
-    raw_text = _re.sub(r"\bdoesn't\s+[^,\u2014.!?]+(,|\u2014)\s*it\s+[^,.!?]+", '', raw_text, flags=_re.IGNORECASE)
-    raw_text = _re.sub(r"\bYou('re| are) not\s+[^.!?]+[.!?]\s*(?=You('re| are)\s)", '', raw_text, flags=_re.IGNORECASE)
-    # Clean up trailing dangling punctuation (a lone em dash or comma
-    # left at the very end of a sentence after a trailing clause was
-    # stripped from just before it)
-    raw_text = _re.sub(r'[\u2014,]\s*(?=[.!?]|$)', '', raw_text)
-    raw_text = _re.sub(r'\s{2,}', ' ', raw_text)
-    raw_text = _re.sub(r'\s+([.,!?])', r'\1', raw_text)
+    # The regex-based AI-tell filter that used to live here -- stripping
+    # specific banned words and phrases after the fact -- is gone.
+    # Direct, repeated feedback: it kept breaking the actual writing
+    # (an orphaned parenthesis, a sentence left without a verb) worse
+    # than the tells it was trying to catch, and the real problem was
+    # never solvable by chasing an ever-growing list of forbidden
+    # phrasings -- it's a voice problem, not a vocabulary problem. The
+    # fix now lives entirely in the system prompt above, as a positive
+    # voice to write in rather than a list of things not to write.
     return raw_text.strip()
 
 

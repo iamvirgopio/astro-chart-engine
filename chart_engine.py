@@ -679,7 +679,35 @@ def _blend_ingredients_into_answer(ingredients, task_instruction, question_conte
     import re as _re
     raw_text = _re.sub(r'\*{1,2}([^*\n]+?)\*{1,2}', r'\1', raw_text)
     raw_text = _re.sub(r'(?<!\w)_{1,2}([^_\n]+?)_{1,2}(?!\w)', r'\1', raw_text)
-    return raw_text
+
+    # Deterministic AI-tell filter, moved here (was frontend-only, and
+    # only in Lookbook) after direct evidence across several rounds
+    # that prompt instructions alone don't reliably stop the model from
+    # reaching for these constructions, in one surface-wording disguise
+    # or another. Living here instead means it applies to every single
+    # caller of this shared function, not just the one surface that
+    # happened to get complaints. Every pattern below was tested against
+    # real sentences taken directly from actual flagged output before
+    # being trusted, plus control sentences confirming it doesn't
+    # falsely strip legitimate, differently-structured text.
+    raw_text = _re.sub(r'\b(no|nothing)\s+[a-z]+(\s+[a-z]+){0,2}\s*,\s*(no|nothing)\s+[a-z]+(\s+[a-z]+){0,2}\b\.?', '', raw_text, flags=_re.IGNORECASE)
+    raw_text = _re.sub(r',\s*nothing\s+[a-z]+(\s+[a-z]+){0,3}(?=[.!?])', '', raw_text, flags=_re.IGNORECASE)
+    raw_text = _re.sub(r",?\s*(so\s+)?there('s| is) no room for\s+[^,.!?]+", '', raw_text, flags=_re.IGNORECASE)
+    raw_text = _re.sub(r',\s*not\s+[^.!?]+(?=[.!?])', '', raw_text, flags=_re.IGNORECASE)
+    raw_text = _re.sub(r"\b(and|but)\s+you('re| are)\s+not\s+[^.!?]+(?=[.!?])", '', raw_text, flags=_re.IGNORECASE)
+    raw_text = _re.sub(r'\s+rather than\s+[^,.!?]+', '', raw_text, flags=_re.IGNORECASE)
+    raw_text = _re.sub(r',?\s*without\s+[^,.!?]+', '', raw_text, flags=_re.IGNORECASE)
+    raw_text = _re.sub(r",?\s*which (is|reads as|means|signals)\s+(exactly\s+)?[^.!?]+", '', raw_text, flags=_re.IGNORECASE)
+    raw_text = _re.sub(r"\s*That('s| is) (how|what|exactly)\s+[^.!?]+[.!?]", '', raw_text, flags=_re.IGNORECASE)
+    raw_text = _re.sub(r"\bdoesn't\s+[^,\u2014.!?]+(,|\u2014)\s*it\s+[^,.!?]+", '', raw_text, flags=_re.IGNORECASE)
+    raw_text = _re.sub(r"\bYou('re| are) not\s+[^.!?]+[.!?]\s*(?=You('re| are)\s)", '', raw_text, flags=_re.IGNORECASE)
+    # Clean up trailing dangling punctuation (a lone em dash or comma
+    # left at the very end of a sentence after a trailing clause was
+    # stripped from just before it)
+    raw_text = _re.sub(r'[\u2014,]\s*(?=[.!?]|$)', '', raw_text)
+    raw_text = _re.sub(r'\s{2,}', ' ', raw_text)
+    raw_text = _re.sub(r'\s+([.,!?])', r'\1', raw_text)
+    return raw_text.strip()
 
 
 def _blend_vibe_ingredients(ingredients, api_key=None):

@@ -89,7 +89,14 @@ def get_today_transits(req: VibeOfDayRequest):
     from datetime import date
     today = date.today()
     try:
-        natal_houses = req.natal_chart["houses_and_angles"][req.house_system]["houses"]
+        # Houses genuinely can't be calculated without a known birth
+        # time -- houses_and_angles (or this specific house system
+        # within it) can legitimately be None for such a chart. The old
+        # unconditional subscript here crashed with a bare NoneType
+        # error the moment that happened.
+        houses_and_angles = req.natal_chart.get("houses_and_angles") or {}
+        house_system_data = houses_and_angles.get(req.house_system) or {}
+        natal_houses = house_system_data.get("houses")
         jd_ut = ce.julian_day_utc(today.year, today.month, today.day, 12, 0, 0)
         today_positions = ce.compute_positions(jd_ut)
         score, hits = ce.score_day_against_natal(
@@ -113,7 +120,14 @@ def get_vibe_of_day(req: VibeOfDayRequest):
     from datetime import date
     today = date.today()
     try:
-        natal_houses = req.natal_chart["houses_and_angles"][req.house_system]["houses"]
+        # Houses genuinely can't be calculated without a known birth
+        # time -- houses_and_angles (or this specific house system
+        # within it) can legitimately be None for such a chart. The old
+        # unconditional subscript here crashed with a bare NoneType
+        # error the moment that happened.
+        houses_and_angles = req.natal_chart.get("houses_and_angles") or {}
+        house_system_data = houses_and_angles.get(req.house_system) or {}
+        natal_houses = house_system_data.get("houses")
         jd_ut = ce.julian_day_utc(today.year, today.month, today.day, 12, 0, 0)
         today_positions = ce.compute_positions(jd_ut)
         score, hits = ce.score_day_against_natal(

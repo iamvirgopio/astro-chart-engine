@@ -505,7 +505,7 @@ ECLIPSE_DAY_GUIDANCE = {
 }
 
 
-def _blend_ingredients_into_answer(ingredients, task_instruction, question_context=None, api_key=None, sentence_range="2-5", max_tokens=300):
+def _blend_ingredients_into_answer(ingredients, task_instruction, question_context=None, api_key=None, sentence_range="2-5", max_tokens=300, allow_web_search=False):
     """
     THE single shared blending function for every question-answering
     surface in the app -- vibe of day, the main reading engine, synastry
@@ -526,6 +526,10 @@ def _blend_ingredients_into_answer(ingredients, task_instruction, question_conte
         need real room to actually be detailed -- override both together
         so the length instruction and the token ceiling stay consistent
         with each other.
+    allow_web_search: opt-in, real web_search tool access -- the model is
+        told to rely on its own knowledge first and only search when a
+        specific place is mentioned that it genuinely isn't confident
+        about, not reflexively on every call.
     """
     import os, json as jsonlib, urllib.request
     key = api_key or os.environ.get("ANTHROPIC_API_KEY")
@@ -536,7 +540,7 @@ def _blend_ingredients_into_answer(ingredients, task_instruction, question_conte
     question_block = f'They asked: "{question_context}"\n\n' if question_context else ""
 
     system_prompt = (
-        f"You write ONE short, cohesive paragraph (2-5 sentences) {task_instruction}, "
+        f"You write ONE short, cohesive paragraph ({sentence_range} sentences) {task_instruction}, "
         "based ONLY on the real astrological observations given below.\n\n"
         "Voice: plain, direct, casual, mellow -- warm but no fluff, no over-explaining. "
         "Contractions are fine, active voice, dry humor is fine if it fits naturally. "
@@ -551,6 +555,14 @@ def _blend_ingredients_into_answer(ingredients, task_instruction, question_conte
         "do -- stop and write only the real, positive statement directly. Say what something IS, "
         "never what it isn't on the way there. Same for an explicit myth-vs-fact or 'here's what's "
         "true / here's what isn't' structure -- banned in any phrasing, not just that literal one.\n\n"
+        "Also stop after stating a thing -- don't follow it with a trailing clause explaining what "
+        "it accomplishes, why it works, or how it reads to other people. Real feedback on exactly "
+        "this: 'a precise wing of liner that does the work' should have stopped at 'a precise wing "
+        "of liner' -- the trailing 'that does the work' explains the effect instead of just stating "
+        "the thing and trusting it to land. Same failure in longer form: 'the whole effect is quiet "
+        "power, which reads as effortlessly composed to everyone around you, and that's exactly the "
+        "confidence you'll want' -- three separate layers of the same sentence explaining its own "
+        "significance. State the thing. Stop. Do not narrate what it means, signals, or achieves.\n\n"
         "Also plain text only -- this is displayed as-is, with no markdown rendering. Never use "
         "asterisks, underscores, or any other markdown syntax for emphasis or formatting; if "
         "something needs emphasis, say it plainly or restructure the sentence instead.\n\n"
@@ -595,26 +607,53 @@ def _blend_ingredients_into_answer(ingredients, task_instruction, question_conte
            f"because it happened to be strong or exact.\n" if question_context else "")
         + "- End with practical, actionable guidance grounded only in what's given -- guidance "
         "about HOW to approach it, never WHEN it changes, unless that timing was given to you.\n"
-        "- No greeting, no sign-off, no meta-commentary about being an astrology app.\n\n"
+        "- No greeting, no sign-off, no meta-commentary about being an astrology app.\n"
+        + (
+            "- If the question mentions a specific real place by name, use your own knowledge of "
+            "it first -- for well-known places, you likely already know enough about climate, "
+            "culture, and what people typically wear there. Only use the web_search tool if you "
+            "genuinely aren't confident about that place specifically (a less-famous location, or "
+            "something where being wrong would actually matter to the advice). Don't search "
+            "reflexively just because a place was mentioned.\n"
+            "- If the occasion genuinely spans multiple distinct contexts (e.g. a multi-day trip "
+            "that plausibly involves a beach day, an evening out, and casual daytime wear), it's "
+            "fine to offer 2-3 clearly labeled distinct looks instead of forcing everything into "
+            "one. If the occasion is a single specific event, give ONE cohesive look -- don't "
+            "manufacture extra looks a single occasion doesn't call for. Judge this per request; "
+            "there's no fixed rule for when to split it into more than one.\n"
+            if allow_web_search else ""
+        )
+        + "\n"
         f"{question_block}"
         f"Real observations available -- use only what genuinely serves your one point, not all of them:\n{bullet_list}"
     )
 
-    payload = jsonlib.dumps({
+    payload_dict = {
         "model": "claude-haiku-4-5-20251001",
         "max_tokens": max_tokens,
         "temperature": 0.2,
         "system": system_prompt,
         "messages": [{"role": "user", "content": "Write the reading."}],
-    }).encode("utf-8")
+    }
+    if allow_web_search:
+        payload_dict["tools"] = [{"type": "web_search_20250305", "name": "web_search"}]
+    payload = jsonlib.dumps(payload_dict).encode("utf-8")
     req = urllib.request.Request(
         "https://api.anthropic.com/v1/messages",
         data=payload,
         headers={"Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01"},
     )
-    with urllib.request.urlopen(req, timeout=15) as resp:
+    with urllib.request.urlopen(req, timeout=30 if allow_web_search else 15) as resp:
         body = jsonlib.loads(resp.read())
-    raw_text = body["content"][0]["text"].strip()
+    # With web search enabled, the response can contain multiple content
+    # blocks interleaved (server_tool_use, web_search_tool_result, text)
+    # rather than a single text block -- concatenating every text-type
+    # block is what actually handles that correctly; indexing [0] alone
+    # would grab only the first fragment, or the wrong block entirely,
+    # whenever a search actually happened.
+    raw_text = "".join(
+        block.get("text", "") for block in body.get("content", []) if block.get("type") == "text"
+    ).strip()
     # Deterministic safety net, not just a prompt instruction -- this
     # output is displayed as plain text with no markdown rendering
     # anywhere it's used, so any stray *emphasis* or _emphasis_ the
@@ -2763,7 +2802,7 @@ def recommend_locations(jd_ut, theme_planets, theme_lines=None, top_n=5, orb_deg
 # calculation needed here, just cross-referencing chart_a's positions
 # against chart_b's using the same find_aspect() logic used for transits.
 
-def blend_answer(ingredients, question_text, api_key=None, detailed=False):
+def blend_answer(ingredients, question_text, api_key=None, detailed=False, allow_web_search=False):
     """
     Generic blending entry point for surfaces where the real content
     library lives on the FRONTEND (synastry's 78-pair library, location's
@@ -2776,15 +2815,31 @@ def blend_answer(ingredients, question_text, api_key=None, detailed=False):
     detailed=True gives real room for something that's supposed to be
     genuinely thorough (like the lookbook's "down to the accessories"
     requirement) instead of the default short-reading length.
+
+    allow_web_search=True gives the model a real web_search tool and
+    explicit permission to use it -- but only when its own knowledge
+    genuinely isn't enough (a specific, possibly less-famous place
+    mentioned by name, where real context like climate or local norms
+    actually changes the answer). It's told to rely on what it already
+    knows first and search only when that's genuinely insufficient,
+    not to search reflexively on every call.
     """
     if not ingredients:
         raise ValueError("No ingredients given to blend")
     kwargs = {"sentence_range": "6-10", "max_tokens": 700} if detailed else {}
+    if allow_web_search:
+        # A genuinely thorough, place-aware answer (potentially
+        # multiple distinct looks) needs more room than the detailed
+        # default already gives -- widened further here specifically
+        # for this case rather than raising the shared detailed default
+        # for every other caller that doesn't need it.
+        kwargs["max_tokens"] = max(kwargs.get("max_tokens", 300), 900)
     return _blend_ingredients_into_answer(
         ingredients,
         task_instruction="directly answering their specific question",
         question_context=question_text,
         api_key=api_key,
+        allow_web_search=allow_web_search,
         **kwargs,
     )
 

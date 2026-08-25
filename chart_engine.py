@@ -1032,7 +1032,15 @@ def compute_planetary_hours(year, month, day, lat, lon):
         hours.append({"hour": i + 1, "type": "night", "start": jd_to_iso_utc(start), "end": jd_to_iso_utc(start + night_hour_length), "planet": planet})
 
     return {"sunrise": jd_to_iso_utc(sunrise), "sunset": jd_to_iso_utc(sunset),
-            "next_sunrise": jd_to_iso_utc(next_sunrise), "day_ruler": ruler, "hours": hours}
+            "next_sunrise": jd_to_iso_utc(next_sunrise), "day_ruler": ruler, "hours": hours,
+            # Resolved once here rather than requiring the frontend to
+            # know or guess a timezone for whatever location was
+            # checked -- planetary hours are inherently location-bound
+            # (sunrise/sunset at THAT place), so displaying them in
+            # that location's own local time is what actually makes
+            # sense, not the viewer's own device timezone or an
+            # unrelated stored preference.
+            "timezone": _tf.timezone_at(lat=lat, lng=lon)}
 
 
 def jd_to_iso_utc(jd):

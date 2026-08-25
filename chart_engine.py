@@ -540,9 +540,20 @@ def _blend_ingredients_into_answer(ingredients, task_instruction, question_conte
         "based ONLY on the real astrological observations given below.\n\n"
         "Voice: plain, direct, casual, mellow -- warm but no fluff, no over-explaining. "
         "Contractions are fine, active voice, dry humor is fine if it fits naturally. "
-        "CRITICAL: never use a contrastive tacked-on clause like 'not X, but Y' or 'not just Z', "
-        "and never set up an explicit myth-vs-fact or 'here's what's true / here's what isn't' "
-        "structure -- these are specific tells to avoid, not style choices.\n\n"
+        "CRITICAL, and worth being explicit about since narrower versions of this instruction "
+        "keep getting worked around in different surface wording: never define something by "
+        "rejecting an alternative first. This is ONE underlying rhetorical move that shows up in "
+        "many different textual disguises, and ALL of them are banned, not just the most obvious "
+        "phrasing -- 'not X, but Y', 'no X, all Y', 'not just Z', 'you're not X, you're Y', "
+        "'you're not X, you're simply Y', 'instead of X', 'rather than X'. If you notice yourself "
+        "about to write a rejected state before the real one -- ANY phrasing where you name "
+        "something the reader supposedly ISN'T or DOESN'T, before saying what they are or should "
+        "do -- stop and write only the real, positive statement directly. Say what something IS, "
+        "never what it isn't on the way there. Same for an explicit myth-vs-fact or 'here's what's "
+        "true / here's what isn't' structure -- banned in any phrasing, not just that literal one.\n\n"
+        "Also plain text only -- this is displayed as-is, with no markdown rendering. Never use "
+        "asterisks, underscores, or any other markdown syntax for emphasis or formatting; if "
+        "something needs emphasis, say it plainly or restructure the sentence instead.\n\n"
         "ABSOLUTE RULE, more important than anything else in this prompt: you may state ONLY "
         "facts that appear explicitly in the observations below. Not a similar fact, not a "
         "plausible-sounding fact, not a fact a real astrologer might reasonably infer -- ONLY "
@@ -603,7 +614,20 @@ def _blend_ingredients_into_answer(ingredients, task_instruction, question_conte
     )
     with urllib.request.urlopen(req, timeout=15) as resp:
         body = jsonlib.loads(resp.read())
-    return body["content"][0]["text"].strip()
+    raw_text = body["content"][0]["text"].strip()
+    # Deterministic safety net, not just a prompt instruction -- this
+    # output is displayed as plain text with no markdown rendering
+    # anywhere it's used, so any stray *emphasis* or _emphasis_ the
+    # model still reaches for despite the instruction above would
+    # otherwise show up as literal asterisks/underscores on screen, a
+    # visible tell in its own right. Only strips single/double
+    # asterisks and underscores used as emphasis wrapping a word or
+    # phrase -- doesn't touch genuine mid-word characters like in a
+    # variable name, which this content never contains anyway.
+    import re as _re
+    raw_text = _re.sub(r'\*{1,2}([^*\n]+?)\*{1,2}', r'\1', raw_text)
+    raw_text = _re.sub(r'(?<!\w)_{1,2}([^_\n]+?)_{1,2}(?!\w)', r'\1', raw_text)
+    return raw_text
 
 
 def _blend_vibe_ingredients(ingredients, api_key=None):

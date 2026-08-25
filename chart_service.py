@@ -75,19 +75,37 @@ def get_reading(req: ReadingRequest):
     return result
 
 
-class VibeOfDayRequest(BaseModel):
+class TransitsForDateRequest(BaseModel):
     natal_chart: dict
     house_system: str = "placidus"
+    # Optional override -- when omitted, behaves exactly as before
+    # (today's transits). When provided (e.g. the person's actual
+    # birthday, computed client-side from their own stored birth
+    # month/day), transits are computed for THAT date instead. This is
+    # its own request model rather than reusing VibeOfDayRequest
+    # specifically so /vibe-of-day's contract stays untouched and
+    # unambiguous -- that endpoint must always mean literally today,
+    # regardless of what any caller might pass.
+    target_year: int | None = None
+    target_month: int | None = None
+    target_day: int | None = None
 
 
 @app.post("/today-transits")
-def get_today_transits(req: VibeOfDayRequest):
-    """Raw, unblended transit content for today (why/whats_off, no AI
-    layer touching it) -- used by the ask page for guidance-style
+def get_today_transits(req: TransitsForDateRequest):
+    """Raw, unblended transit content for a given date (why/whats_off,
+    no AI layer touching it) -- used by the ask page for guidance-style
     questions, which combine this with real natal placement content
-    client-side before a single blend call, rather than blending twice."""
+    client-side before a single blend call, rather than blending twice.
+    Defaults to today; pass target_year/month/day to get transits for
+    a specific date instead (e.g. an upcoming birthday) -- the actual
+    fix for readings that referenced "today" when the real question was
+    about a different, known date."""
     from datetime import date
-    today = date.today()
+    if req.target_year and req.target_month and req.target_day:
+        target = date(req.target_year, req.target_month, req.target_day)
+    else:
+        target = date.today()
     try:
         # Houses genuinely can't be calculated without a known birth
         # time -- houses_and_angles (or this specific house system
@@ -97,16 +115,21 @@ def get_today_transits(req: VibeOfDayRequest):
         houses_and_angles = req.natal_chart.get("houses_and_angles") or {}
         house_system_data = houses_and_angles.get(req.house_system) or {}
         natal_houses = house_system_data.get("houses")
-        jd_ut = ce.julian_day_utc(today.year, today.month, today.day, 12, 0, 0)
-        today_positions = ce.compute_positions(jd_ut)
+        jd_ut = ce.julian_day_utc(target.year, target.month, target.day, 12, 0, 0)
+        target_positions = ce.compute_positions(jd_ut)
         score, hits = ce.score_day_against_natal(
-            today_positions, req.natal_chart["positions"], "timing", natal_houses
+            target_positions, req.natal_chart["positions"], "timing", natal_houses
         )
-        day_result = {"date": today.isoformat(), "score": score, "hits": hits}
+        day_result = {"date": target.isoformat(), "score": score, "hits": hits}
         reading = ce.generate_reading(day_result, req.natal_chart["positions"], natal_houses)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     return reading
+
+
+class VibeOfDayRequest(BaseModel):
+    natal_chart: dict
+    house_system: str = "placidus"
 
 
 @app.post("/vibe-of-day")

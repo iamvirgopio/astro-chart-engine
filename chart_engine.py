@@ -564,7 +564,13 @@ def _blend_ingredients_into_answer(ingredients, task_instruction, question_conte
         "- Weave them into ONE natural paragraph, not a list, not separate labeled sentences "
         "per item, not 'for you specifically' / 'for them' split out as separate parts.\n"
         + (f"- Directly answer what they actually asked -- don't just restate the astrology in "
-           f"isolation.\n" if question_context else "")
+           f"isolation.\n"
+           f"- If an observation doesn't genuinely relate to what they asked, don't force it into "
+           f"the answer just because it was given to you -- weave together only the ones that "
+           f"actually help answer the question, even if that means using fewer than all of them. "
+           f"A technically-true but off-topic astrological fact (e.g. a transit touching an area of "
+           f"life that has nothing to do with what they're asking) does not belong in the answer just "
+           f"because it happened to be strong or exact.\n" if question_context else "")
         + "- End with practical, actionable guidance grounded only in what's given -- guidance "
         "about HOW to approach it, never WHEN it changes, unless that timing was given to you.\n"
         "- No greeting, no sign-off, no meta-commentary about being an astrology app.\n\n"

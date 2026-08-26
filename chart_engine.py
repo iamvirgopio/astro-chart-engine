@@ -617,11 +617,18 @@ def _blend_ingredients_into_answer(ingredients, task_instruction, question_conte
     )
 
     payload_dict = {
-        "model": "claude-sonnet-5",  # switched from haiku after repeated,
-        # persistent failure to hold a nuanced tone instruction across
-        # many rounds -- a real, previously-untried lever, not a magic
-        # fix, but haiku is optimized for cost/speed over exactly the
-        # kind of subtle, consistent style-following this needs
+        # Reverted to the known-working, correctly-versioned model
+        # string after this exact identifier change lined up precisely
+        # with silent, total API failures (confirmed via the lookbook
+        # fallback catch, which had zero error logging until just now).
+        # Unlike this ID, haiku's real string carries a date suffix
+        # (-20251001) -- "claude-sonnet-5" alone was never actually
+        # confirmed valid, and it should not have been guessed at
+        # without a way to verify it from here. If a stronger model is
+        # worth trying again for the tone-consistency issue, it needs
+        # a verified, correctly-versioned identifier first, not another
+        # guess.
+        "model": "claude-haiku-4-5-20251001",
         "max_tokens": max_tokens,
         "temperature": 0.2,
         "system": system_prompt,

@@ -551,31 +551,16 @@ def _blend_ingredients_into_answer(ingredients, task_instruction, question_conte
         "step. If the observations below feel thin for a given request, make the strongest "
         "reading you can from what's actually there rather than declining to answer -- there is "
         "always enough to say something real.\n\n"
-        "Voice: write the way a Virgo Sun with a Scorpio Venus actually talks. Virgo means "
-        "exacting and detailed, but it never pads -- it doesn't over-explain, doesn't narrate its "
-        "own reasoning out loud, doesn't follow a statement with commentary on what the statement "
-        "means, and it doesn't qualify a plain statement by naming what it isn't first -- no "
-        "'instead of X,' no 'without X,' no stacked 'no X, no Y' pairs. It just says the one true, "
-        "specific thing. Scorpio Venus means real warmth underneath that precision -- not gushing, "
-        "not performing enthusiasm, but genuine heat when something calls for it, and comfortable "
-        "with a touch of sensuality or edge when the moment is right. Detailed means covering more "
-        "distinct pieces of advice -- hair, makeup, outfit, accessories -- NOT saying more about "
-        "each one. One clause per sentence. No dash, colon, or semicolon adding a second clause. "
-        "Most sentences under 15 words. Say the thing. Stop. Next sentence, next point.\n\n"
-        "Per item: name it and stop. Do not add a clause about how it reads, how it feels, what "
-        "it suggests, or the story behind it -- 'something that reads as intentional rather than "
-        "borrowed,' 'suggests you've worn it for years,' 'mismatched pieces that look like they "
-        "found each other over time' are ALL the same padding, just dressed differently, and "
-        "they're banned on every single item, not just some of them. The only exception: a short, "
-        "direct tie to one of the actual placements given below -- a few words, not a clause, and "
-        "only when it's a real point, not scene-setting. You do not need to justify, explain, or "
-        "narrate why an item works. Naming it well IS the advice.\n\n"
-        "No opening sentence that frames the occasion or explains why before any real advice "
-        "starts -- start WITH the first real piece of advice. No closing sentence summarizing "
-        "who you'll be or how you'll feel -- end ON the last real piece of advice, then stop. "
-        "This is not optional or occasional -- it applies every single time, with no exceptions. "
-        "The sentence-count range given below is a ceiling, not a target -- use as few "
-        "sentences as the real content needs.\n\n"
+        "Voice: say what needs to be said. Nothing more. Every sentence states one concrete "
+        "fact -- an item, a color, a fit, a function. Before adding anything past that fact, ask "
+        "one question: is this a NEW CONCRETE FACT, or is it COMMENTARY on how the thing reads, "
+        "feels, suggests, or what story it tells? Facts stay. Commentary gets cut, always, no "
+        "exceptions for a line that sounds nice. State the item. Stop. Next item. Warmth comes "
+        "from being direct and specific, not from describing effects. Don't mince words. Add "
+        "detail only when it does real work (fabric, fit, function) -- never as filler.\n\n"
+        "No opening sentence framing the occasion. No closing sentence summarizing who you'll be "
+        "or how you'll feel. Start on the first real piece of advice, end on the last one, stop. "
+        "The sentence-count range below is a ceiling, not a target.\n\n"
         "Plain text only -- this is displayed as-is, with no markdown rendering. Never use "
         "asterisks, underscores, or any other markdown syntax for emphasis; if something needs "
         "emphasis, say it plainly.\n\n"
@@ -623,7 +608,11 @@ def _blend_ingredients_into_answer(ingredients, task_instruction, question_conte
     )
 
     payload_dict = {
-        "model": "claude-haiku-4-5-20251001",
+        "model": "claude-sonnet-5",  # switched from haiku after repeated,
+        # persistent failure to hold a nuanced tone instruction across
+        # many rounds -- a real, previously-untried lever, not a magic
+        # fix, but haiku is optimized for cost/speed over exactly the
+        # kind of subtle, consistent style-following this needs
         "max_tokens": max_tokens,
         "temperature": 0.2,
         "system": system_prompt,

@@ -2,3 +2,6 @@ fastapi
 uvicorn
 pyswisseph
 timezonefinder
+stripe
+supabase
+pywebpush

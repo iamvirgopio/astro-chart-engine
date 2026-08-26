@@ -2813,6 +2813,64 @@ def recommend_locations(jd_ut, theme_planets, theme_lines=None, top_n=5, orb_deg
 # calculation needed here, just cross-referencing chart_a's positions
 # against chart_b's using the same find_aspect() logic used for transits.
 
+def _cut_commentary(raw_text, api_key=None):
+    """
+    Second pass, one narrow job only: cut commentary, keep facts. Not
+    a rewording of the generation prompt again -- a genuinely different
+    architecture, tried after six rounds of asking one call to be
+    detailed, sign-aware, concise, AND commentary-free all at once kept
+    dropping one constraint or another every time. Splitting "write the
+    content" from "enforce this one specific voice rule" into two
+    focused calls means each one has an achievable job instead of five
+    competing ones. This also edits coherently rather than deleting
+    text mechanically -- the earlier regex approach broke grammar
+    (an orphaned parenthesis, a sentence with no verb) because deleting
+    a phrase doesn't repair the sentence around the hole it leaves; an
+    actual rewrite can.
+    """
+    import os, json as jsonlib, urllib.request
+    key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+    if not key:
+        return raw_text
+    system_prompt = (
+        "Rewrite the text below. Keep every concrete fact exactly: every item, color, fit, "
+        "fabric, and any short, direct reference to an actual placement (a sign, planet). Cut "
+        "everything else -- specifically, cut any clause that explains what an item means, "
+        "signals, achieves, or how it 'reads' to other people; cut any opening sentence that "
+        "doesn't name a concrete item; cut any closing sentence summarizing an overall feeling, "
+        "presence, or identity instead of naming an item. If a sentence is entirely commentary "
+        "with no concrete fact in it at all, delete the whole sentence. Do not add anything new. "
+        "Do not soften or rephrase the facts that stay -- only remove what doesn't belong. "
+        "Plain text only, no markdown. Return ONLY the rewritten text, nothing else -- no preamble, "
+        "no explanation of what you changed."
+    )
+    payload = jsonlib.dumps({
+        "model": "claude-haiku-4-5-20251001",
+        "max_tokens": 700,
+        "temperature": 0,
+        "system": system_prompt,
+        "messages": [{"role": "user", "content": raw_text}],
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages",
+        data=payload,
+        headers={"Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            body = jsonlib.loads(resp.read())
+        edited = "".join(
+            block.get("text", "") for block in body.get("content", []) if block.get("type") == "text"
+        ).strip()
+        return edited if edited else raw_text
+    except Exception:
+        # If the edit pass itself fails for any reason, the original,
+        # unedited draft is still a real, usable answer -- fail back to
+        # it rather than losing the whole response over a second call
+        # that was only ever meant to tighten it further.
+        return raw_text
+
+
 def blend_answer(ingredients, question_text, api_key=None, detailed=False, allow_web_search=False):
     """
     Generic blending entry point for surfaces where the real content
@@ -2825,7 +2883,10 @@ def blend_answer(ingredients, question_text, api_key=None, detailed=False, allow
 
     detailed=True gives real room for something that's supposed to be
     genuinely thorough (like the lookbook's "down to the accessories"
-    requirement) instead of the default short-reading length.
+    requirement) instead of the default short-reading length. It also
+    runs a second, focused editing pass afterward -- detailed answers
+    (many items, many sentences) are exactly where per-item commentary
+    kept creeping back in no matter how the first-pass prompt was worded.
 
     allow_web_search=True gives the model a real web_search tool and
     explicit permission to use it -- but only when its own knowledge
@@ -2845,7 +2906,7 @@ def blend_answer(ingredients, question_text, api_key=None, detailed=False, allow
         # for this case rather than raising the shared detailed default
         # for every other caller that doesn't need it.
         kwargs["max_tokens"] = max(kwargs.get("max_tokens", 300), 900)
-    return _blend_ingredients_into_answer(
+    result = _blend_ingredients_into_answer(
         ingredients,
         task_instruction="directly answering their specific question",
         question_context=question_text,
@@ -2853,6 +2914,10 @@ def blend_answer(ingredients, question_text, api_key=None, detailed=False, allow
         allow_web_search=allow_web_search,
         **kwargs,
     )
+    if detailed:
+        result = _cut_commentary(result, api_key=api_key)
+    return result
+
 
 
 def compute_synastry(chart_a_positions, chart_b_positions, label_a="A", label_b="B"):

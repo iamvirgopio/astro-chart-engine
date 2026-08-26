@@ -5,11 +5,64 @@ app can request a chart for ANY user's birth data, not a hardcoded example.
 Run locally with: uvicorn chart_service:app --reload --port 8001
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 import chart_engine as ce
+import billing
+import push
 
 app = FastAPI(title="Chart Engine Service")
+app.include_router(billing.router)
+app.include_router(push.router)
+
+
+def _real_client_ip(request: Request) -> str:
+    """Railway (and most reverse proxies) sit in front of this app, so
+    request.client.host alone would report the proxy's own address for
+    every single request, not the actual visitor -- X-Forwarded-For is
+    where the real origin IP actually shows up. Falls back to
+    request.client.host only if that header is genuinely absent."""
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+_SIGNUP_IP_LIMIT = 3
+_SIGNUP_IP_WINDOW_HOURS = 24
+
+
+@app.post("/signup/check-rate-limit")
+def check_signup_rate_limit(request: Request):
+    """Called by the frontend BEFORE actually creating a Supabase
+    account -- rate-limits by IP within a time window rather than a
+    lifetime one-email-per-IP block. A hard lifetime block would punish
+    every legitimate household, office, or mobile carrier's customers
+    who happen to share a public IP with someone who already signed up
+    (mobile carriers in particular route huge numbers of genuinely
+    different people through a small pool of shared addresses) --
+    while barely slowing down anyone actually trying to abuse the
+    referral system, since switching from WiFi to cellular data
+    defeats a raw IP check in seconds anyway. A short window catches
+    the actual abuse pattern (rapid-fire fake signups in one sitting)
+    without that cost.
+    """
+    import os
+    from supabase import create_client
+    from datetime import datetime, timedelta, timezone
+
+    supabase_admin = create_client(
+        os.environ.get("SUPABASE_URL", ""), os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+    )
+    ip = _real_client_ip(request)
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=_SIGNUP_IP_WINDOW_HOURS)).isoformat()
+
+    recent = supabase_admin.table("signup_ip_log").select("id").eq("ip_address", ip).gte("created_at", cutoff).execute()
+    if len(recent.data or []) >= _SIGNUP_IP_LIMIT:
+        raise HTTPException(status_code=429, detail="Too many accounts created recently from this connection -- try again later.")
+
+    supabase_admin.table("signup_ip_log").insert({"ip_address": ip}).execute()
+    return {"allowed": True}
 
 
 class ChartRequest(BaseModel):
@@ -130,6 +183,67 @@ def get_today_transits(req: TransitsForDateRequest):
 class VibeOfDayRequest(BaseModel):
     natal_chart: dict
     house_system: str = "placidus"
+
+
+_ASPECT_FRAMING = {
+    "trine": "a supportive, easy-flowing alignment",
+    "sextile": "a supportive alignment that takes some initiative to use well",
+    "square": "real friction that pushes growth through tension",
+    "opposition": "a pull between two real, competing needs",
+    "conjunction": "a blending and intensifying of both energies together",
+}
+
+
+class YearAheadRequest(BaseModel):
+    natal_chart: dict
+    year: int
+
+
+@app.post("/year-ahead")
+def get_year_ahead(req: YearAheadRequest):
+    """The year's real, distinct outer-planet themes, written into one
+    genuine overview via the same shared blend function every other
+    reading in the app uses -- not hand-written content for every
+    possible planet combination, which isn't a tractable amount of
+    content to write well."""
+    try:
+        hits = ce.scan_year_ahead(req.natal_chart["positions"], req.year, samples=52)
+        top_hits = hits[:6]
+        ingredients = []
+        for h in top_hits:
+            framing = _ASPECT_FRAMING.get(h["aspect"], "a real alignment")
+            month_name = h["approx_date"][:7]
+            ingredients.append((
+                f"{h['transiting']}_{h['natal']}",
+                f"{h['transiting']} forms a {h['aspect']} to your natal {h['natal']}, closest around {month_name} -- {framing}."
+            ))
+        if not ingredients:
+            return {"message": "Nothing especially strong from the outer planets stands out this year -- a comparatively quiet one, astrologically."}
+        message = ce.blend_answer(
+            ingredients,
+            f"Give a genuine overview of what {req.year} looks like astrologically for this person, based on these real outer-planet transits across the year.",
+            detailed=True,
+        )
+        return {"message": message, "themes": top_hits}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/moon-phases")
+def get_moon_phases():
+    """Current moon phase plus the next 8 upcoming phase transitions with
+    their exact dates -- the real astronomical data behind the Moon
+    Phases page. No personal chart data needed at all, so this takes no
+    request body."""
+    from datetime import date
+    today = date.today()
+    jd_now = ce.julian_day_utc(today.year, today.month, today.day, 12, 0, 0)
+    current = ce.moon_phase(jd_now)
+    upcoming = ce.find_next_moon_phases(jd_now, count=8)
+    return {
+        "current": current,
+        "upcoming": [{"phase": u["phase"], "date": ce.jd_to_iso_utc(u["jd"])} for u in upcoming],
+    }
 
 
 @app.post("/vibe-of-day")

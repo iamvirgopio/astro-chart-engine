@@ -781,9 +781,56 @@ def _blend_vibe_ingredients(ingredients, api_key=None):
     )
 
 
+ANGLE_MEANING = {
+    "Ascendant": "how you show up and the direction you're moving in",
+    "Descendant": "your close relationships and partnerships",
+    "Midheaven": "career, direction, and how you're seen publicly",
+    "IC": "home, family, and your private foundation",
+}
+
+OUTER_PLANET_CROSSING_MEANING = {
+    "Jupiter": "real expansion and opportunity opening up here",
+    "Saturn": "something here becoming concrete, tested, and permanent",
+    "Uranus": "a sudden, disruptive shift in this area",
+    "Neptune": "old boundaries here dissolving before anything clearer replaces them",
+    "Pluto": "a genuine, deep turning point in this part of your life",
+}
+
+
+def _check_angle_transits(transiting_positions, angle_data):
+    """Checks whether an outer planet is conjunct one of the natal
+    angles (Ascendant, Midheaven, Descendant, IC) right now. Restricted
+    to outer planets and a tight 3-degree orb on purpose: a fast planet
+    crosses all four angles every single day, which would mean nothing
+    and would just be noise; an outer planet sitting exactly on an
+    angle is genuinely rare -- for the slowest of them, it can happen
+    only once or twice in a lifetime -- which is what makes it worth
+    naming as a real event rather than routine astrological weather.
+    """
+    if not angle_data:
+        return None
+    asc = (angle_data.get("ascendant") or {}).get("longitude")
+    mc = (angle_data.get("midheaven") or {}).get("longitude")
+    if asc is None or mc is None:
+        return None
+    angle_points = {
+        "Ascendant": asc, "Descendant": (asc + 180) % 360,
+        "Midheaven": mc, "IC": (mc + 180) % 360,
+    }
+    best = None
+    for t_name, t_data in transiting_positions.items():
+        if t_name == "_skipped" or t_name not in OUTER_PLANETS:
+            continue
+        for angle_name, angle_lon in angle_points.items():
+            diff = abs((t_data["longitude"] - angle_lon + 180) % 360 - 180)
+            if diff <= 3.0 and (best is None or diff < best["orb"]):
+                best = {"planet": t_name, "angle": angle_name, "orb": diff}
+    return best
+
+
 def generate_integrated_vibe_of_day(day_result, natal_positions, natal_houses,
                                      retrogrades_today, eclipse_today, moon_phase_today,
-                                     api_key=None):
+                                     today_positions=None, angle_data=None, api_key=None):
     """
     The real 'horoscope on steroids' -- gathers every real ingredient
     (transit why/whats_off, moon phase, active retrogrades, eclipse if
@@ -795,6 +842,22 @@ def generate_integrated_vibe_of_day(day_result, natal_positions, natal_houses,
     base_reading = generate_reading(day_result, natal_positions, natal_houses)
 
     ingredients = []
+
+    # Checked and added first, ahead of everything else -- an outer
+    # planet conjunct a natal angle is rarer and more structurally
+    # significant than a routine planet-to-planet transit, so when it's
+    # genuinely happening, it earns priority over the ordinary hits
+    # below, not just an equal footing with them.
+    angle_hit = _check_angle_transits(today_positions, angle_data) if today_positions else None
+    if angle_hit:
+        planet, angle = angle_hit["planet"], angle_hit["angle"]
+        ingredients.append((
+            "angle_transit",
+            f"{planet} is conjunct your natal {angle} right now -- {ANGLE_MEANING[angle]}, meeting "
+            f"{OUTER_PLANET_CROSSING_MEANING[planet]}. This is a genuinely rare marker, not routine "
+            f"astrological weather."
+        ))
+
     if base_reading["why"]:
         ingredients.append(("transit_favorable", base_reading["why"]))
     if base_reading["whats_off"]:

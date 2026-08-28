@@ -551,7 +551,7 @@ ECLIPSE_DAY_GUIDANCE = {
 }
 
 
-def _blend_ingredients_into_answer(ingredients, task_instruction, question_context=None, api_key=None, sentence_range="2-5", max_tokens=300, allow_web_search=False):
+def _blend_ingredients_into_answer(ingredients, task_instruction, question_context=None, api_key=None, sentence_range="2-5", max_tokens=300, allow_web_search=False, interpretive=False):
     """
     THE single shared blending function for every question-answering
     surface in the app -- vibe of day, the main reading engine, synastry
@@ -576,6 +576,15 @@ def _blend_ingredients_into_answer(ingredients, task_instruction, question_conte
         told to rely on its own knowledge first and only search when a
         specific place is mentioned that it genuinely isn't confident
         about, not reflexively on every call.
+    interpretive: swaps the default strict "concrete facts only, cut
+        all commentary" voice for one that explains actual meaning and
+        implications instead. The default voice was built for and is
+        correct for Star Stylist -- state the item, cut anything about
+        how it reads or feels. But that same rule, forced onto a caller
+        whose entire job IS explaining what something means (Year
+        Ahead), told the model to strip out the interpretation itself
+        as "commentary," which is exactly what happened in practice --
+        a real, repeatable bug, not a style preference to tune.
     """
     import os, json as jsonlib, urllib.request
     key = api_key or os.environ.get("ANTHROPIC_API_KEY")
@@ -597,23 +606,35 @@ def _blend_ingredients_into_answer(ingredients, task_instruction, question_conte
         "step. If the observations below feel thin for a given request, make the strongest "
         "reading you can from what's actually there rather than declining to answer -- there is "
         "always enough to say something real.\n\n"
-        "Voice: say what needs to be said. Nothing more. Every sentence states one concrete "
-        "fact -- an item, a color, a fit, a function. Before adding anything past that fact, ask "
-        "one question: is this a NEW CONCRETE FACT, or is it COMMENTARY on how the thing reads, "
-        "feels, suggests, or what story it tells? Facts stay. Commentary gets cut, always, no "
-        "exceptions for a line that sounds nice. State the item. Stop. Next item. Warmth comes "
-        "from being direct and specific, not from describing effects. Don't mince words.\n\n"
-        "Concrete means SPECIFIC, not brief -- cutting commentary is not license to cut detail. "
-        "Name the actual garment (a slip dress, leather leggings, a tailored blazer), the actual "
-        "color (oxblood, not just 'dark red'), the actual technique or product type. 'Hair: deep, "
-        "rich color' is vague -- it's a category, not an instruction. 'A single-process espresso "
-        "brown, sleek, center-parted' is detailed. Say MORE specific facts, not fewer -- concise "
-        "means no wasted words, never fewer real facts.\n\n"
-        "The first sentence must name a specific, concrete item -- a garment, a color, a "
-        "technique. It can never open on a mood or vibe word (intense, magnetic, mysterious, "
-        "effortless, composed) describing the overall impression -- that's the same banned "
-        "opening-summary move, just one word instead of a full sentence.\n\n"
-        "No closing sentence summarizing who you'll be or how you'll feel. Start on the first "
+        + (
+            "Voice: explain what's actually happening and why it matters. State the real "
+            "mechanism -- which planets, what kind of alignment, roughly when -- then say what it "
+            "actually means for the person and what it's likely to require of them. The "
+            "interpretation is the entire point here, not something to trim away in favor of bare "
+            "facts. Still direct, no padding, no vague reassurance, no vibe-word summaries -- "
+            "explain, don't decorate.\n\n"
+            "The first sentence should name a specific, real transit or theme -- not an abstract "
+            "opening line ('this is a year of growth and change') that could apply to any year for "
+            "anyone.\n\n"
+            if interpretive else
+            "Voice: say what needs to be said. Nothing more. Every sentence states one concrete "
+            "fact -- an item, a color, a fit, a function. Before adding anything past that fact, ask "
+            "one question: is this a NEW CONCRETE FACT, or is it COMMENTARY on how the thing reads, "
+            "feels, suggests, or what story it tells? Facts stay. Commentary gets cut, always, no "
+            "exceptions for a line that sounds nice. State the item. Stop. Next item. Warmth comes "
+            "from being direct and specific, not from describing effects. Don't mince words.\n\n"
+            "Concrete means SPECIFIC, not brief -- cutting commentary is not license to cut detail. "
+            "Name the actual garment (a slip dress, leather leggings, a tailored blazer), the actual "
+            "color (oxblood, not just 'dark red'), the actual technique or product type. 'Hair: deep, "
+            "rich color' is vague -- it's a category, not an instruction. 'A single-process espresso "
+            "brown, sleek, center-parted' is detailed. Say MORE specific facts, not fewer -- concise "
+            "means no wasted words, never fewer real facts.\n\n"
+            "The first sentence must name a specific, concrete item -- a garment, a color, a "
+            "technique. It can never open on a mood or vibe word (intense, magnetic, mysterious, "
+            "effortless, composed) describing the overall impression -- that's the same banned "
+            "opening-summary move, just one word instead of a full sentence.\n\n"
+        )
+        + "No closing sentence summarizing who you'll be or how you'll feel. Start on the first "
         "real piece of advice, end on the last one, stop. The sentence-count range below is a "
         "ceiling, not a target.\n\n"
         + (
@@ -3098,7 +3119,7 @@ def _cut_commentary(raw_text, api_key=None):
         return raw_text
 
 
-def blend_answer(ingredients, question_text, api_key=None, detailed=False, allow_web_search=False):
+def blend_answer(ingredients, question_text, api_key=None, detailed=False, allow_web_search=False, interpretive=False):
     """
     Generic blending entry point for surfaces where the real content
     library lives on the FRONTEND (synastry's 78-pair library, location's
@@ -3139,9 +3160,16 @@ def blend_answer(ingredients, question_text, api_key=None, detailed=False, allow
         question_context=question_text,
         api_key=api_key,
         allow_web_search=allow_web_search,
+        interpretive=interpretive,
         **kwargs,
     )
-    if detailed:
+    if detailed and not interpretive:
+        # This second pass exists specifically to strip out
+        # interpretation and keep only concrete facts -- exactly
+        # backwards for an interpretive caller, whose entire point is
+        # the interpretation. Running it unconditionally whenever
+        # detailed=True (which interpretive callers also need, for the
+        # longer token budget) would silently undo the fix above.
         result = _cut_commentary(result, api_key=api_key)
     return result
 

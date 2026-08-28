@@ -285,6 +285,7 @@ def get_vibe_of_day(req: VibeOfDayRequest):
         reading = ce.generate_integrated_vibe_of_day(
             day_result, req.natal_chart["positions"], natal_houses,
             retrogrades_today, eclipse_today, moon_phase_today,
+            today_positions=today_positions, angle_data=house_system_data,
         )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

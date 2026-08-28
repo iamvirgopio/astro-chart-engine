@@ -776,6 +776,22 @@ def generate_integrated_vibe_of_day(day_result, natal_positions, natal_houses,
 
     try:
         result["message"] = _blend_vibe_ingredients(ingredients, api_key)
+        # A rare model slip -- producing meta-commentary about missing
+        # data instead of an actual reading -- would otherwise get
+        # cached by the frontend exactly like a good reading and served
+        # for the rest of that day, with no way to self-correct. This
+        # is a narrow, low-false-positive check for that specific
+        # failure shape, not a general quality filter -- it only
+        # catches a response that is visibly NOT a reading at all.
+        if _looks_like_meta_response(result["message"]):
+            result["message"] = _blend_vibe_ingredients(ingredients, api_key)  # one retry
+        if _looks_like_meta_response(result["message"]):
+            # Still bad after a retry -- fall back to the same raw,
+            # ungraded ingredients text already used for a hard API
+            # failure below, rather than let a second bad response
+            # through to be cached.
+            result["message"] = " ".join(text for _, text in ingredients)
+            result["blend_failed"] = True
     except Exception:
         # Graceful fallback: real content, just not blended into one
         # voice -- still accurate, still useful, just less seamless.
@@ -783,6 +799,18 @@ def generate_integrated_vibe_of_day(day_result, natal_positions, natal_houses,
         result["blend_failed"] = True
 
     return result
+
+
+def _looks_like_meta_response(message):
+    """Narrow check for the one specific failure shape seen in
+    practice: the model describing what it needs instead of writing
+    the reading. Deliberately conservative -- checks for phrasing that
+    would never appear in a genuine reading, not anything a real
+    reading might plausibly say, since a false positive here means
+    discarding a perfectly good reading."""
+    lowered = message.lower()
+    tells = ["i need the actual", "you've given me", "what's their chart", "give me the", "please provide"]
+    return any(tell in lowered for tell in tells)
 
 
 def generate_reading(day_result, natal_positions, natal_houses=None):

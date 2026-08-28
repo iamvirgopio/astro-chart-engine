@@ -776,25 +776,22 @@ def generate_integrated_vibe_of_day(day_result, natal_positions, natal_houses,
 
     try:
         result["message"] = _blend_vibe_ingredients(ingredients, api_key)
-        # A rare model slip -- producing meta-commentary about missing
-        # data instead of an actual reading -- would otherwise get
-        # cached by the frontend exactly like a good reading and served
-        # for the rest of that day, with no way to self-correct. This
-        # is a narrow, low-false-positive check for that specific
-        # failure shape, not a general quality filter -- it only
-        # catches a response that is visibly NOT a reading at all.
         if _looks_like_meta_response(result["message"]):
+            print(f"[vibe-of-day] meta-response detected on first attempt, retrying. Original: {result['message'][:200]}")
             result["message"] = _blend_vibe_ingredients(ingredients, api_key)  # one retry
         if _looks_like_meta_response(result["message"]):
-            # Still bad after a retry -- fall back to the same raw,
-            # ungraded ingredients text already used for a hard API
-            # failure below, rather than let a second bad response
-            # through to be cached.
+            print(f"[vibe-of-day] meta-response detected again after retry, falling back to raw text. Retry output: {result['message'][:200]}")
             result["message"] = " ".join(text for _, text in ingredients)
             result["blend_failed"] = True
-    except Exception:
+    except Exception as e:
         # Graceful fallback: real content, just not blended into one
         # voice -- still accurate, still useful, just less seamless.
+        # Logged with the real exception now -- this was previously a
+        # bare `except Exception:` with nothing printed, so a genuine
+        # API failure and a rare model slip were indistinguishable from
+        # the outside. Silent fallbacks are exactly what made the last
+        # issue take multiple rounds of guessing to pin down.
+        print(f"[vibe-of-day] blend call raised an exception, falling back to raw text: {type(e).__name__}: {e}")
         result["message"] = " ".join(text for _, text in ingredients)
         result["blend_failed"] = True
 

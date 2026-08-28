@@ -689,36 +689,65 @@ def _blend_ingredients_into_answer(ingredients, task_instruction, question_conte
     if allow_web_search:
         payload_dict["tools"] = [{"type": "web_search_20250305", "name": "web_search"}]
     payload = jsonlib.dumps(payload_dict).encode("utf-8")
-    req = urllib.request.Request(
-        "https://api.anthropic.com/v1/messages",
-        data=payload,
-        headers={"Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01"},
-    )
-    with urllib.request.urlopen(req, timeout=30 if allow_web_search else 15) as resp:
-        body = jsonlib.loads(resp.read())
-    # With web search enabled, the response can contain multiple content
-    # blocks interleaved (server_tool_use, web_search_tool_result, text)
-    # rather than a single text block -- concatenating every text-type
-    # block is what actually handles that correctly; indexing [0] alone
-    # would grab only the first fragment, or the wrong block entirely,
-    # whenever a search actually happened.
-    raw_text = "".join(
-        block.get("text", "") for block in body.get("content", []) if block.get("type") == "text"
-    ).strip()
-    # Deterministic safety net, not just a prompt instruction -- this
-    # output is displayed as plain text with no markdown rendering
-    # anywhere it's used, so any stray *emphasis* or _emphasis_ the
-    # model still reaches for despite the instruction above would
-    # otherwise show up as literal asterisks/underscores on screen, a
-    # visible tell in its own right. Only strips single/double
-    # asterisks and underscores used as emphasis wrapping a word or
-    # phrase -- doesn't touch genuine mid-word characters like in a
-    # variable name, which this content never contains anyway. This is
-    # a rendering fix, not a tone edit -- it doesn't touch the model's
-    # actual wording, just formatting syntax the display can't render.
-    import re as _re
-    raw_text = _re.sub(r'\*{1,2}([^*\n]+?)\*{1,2}', r'\1', raw_text)
-    raw_text = _re.sub(r'(?<!\w)_{1,2}([^_\n]+?)_{1,2}(?!\w)', r'\1', raw_text)
+
+    def _make_one_call():
+        req = urllib.request.Request(
+            "https://api.anthropic.com/v1/messages",
+            data=payload,
+            headers={"Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01"},
+        )
+        with urllib.request.urlopen(req, timeout=30 if allow_web_search else 15) as resp:
+            body = jsonlib.loads(resp.read())
+        # With web search enabled, the response can contain multiple text
+        # blocks interleaved (server_tool_use, web_search_tool_result,
+        # text) rather than a single one -- concatenating every text-type
+        # block is what actually handles that correctly; indexing [0]
+        # alone would grab only the first fragment, or the wrong block
+        # entirely, whenever a search actually happened.
+        text = "".join(
+            block.get("text", "") for block in body.get("content", []) if block.get("type") == "text"
+        ).strip()
+        # Deterministic safety net, not just a prompt instruction -- this
+        # output is displayed as plain text with no markdown rendering
+        # anywhere it's used, so any stray *emphasis* or _emphasis_ the
+        # model still reaches for despite the instruction above would
+        # otherwise show up as literal asterisks/underscores on screen, a
+        # visible tell in its own right. Only strips single/double
+        # asterisks and underscores used as emphasis wrapping a word or
+        # phrase -- doesn't touch genuine mid-word characters like in a
+        # variable name, which this content never contains anyway.
+        import re as _re
+        text = _re.sub(r'\*{1,2}([^*\n]+?)\*{1,2}', r'\1', text)
+        text = _re.sub(r'(?<!\w)_{1,2}([^_\n]+?)_{1,2}(?!\w)', r'\1', text)
+        return text
+
+    # Real terms actually present in the given ingredients (planet and
+    # point names) -- what a genuinely grounded reading should mention
+    # at least one of, regardless of how it's worded. This replaces an
+    # earlier, much narrower approach that checked the response against
+    # a short list of exact bad phrases seen in practice ("I need the
+    # actual...", "you've given me...") -- that broke the very next
+    # time the model phrased the identical failure differently ("what
+    # placements or transits should I work from?"), which never matched
+    # any of those exact strings. Checking for the PRESENCE of real
+    # content, instead of the ABSENCE of specific bad wording, catches
+    # every phrasing of "I don't actually have the data" at once,
+    # because a response that isn't using the real ingredients won't
+    # name any of them, no matter how the failure is worded.
+    key_terms = [name for name in PLANETS if name in bullet_list]
+
+    def _is_grounded(text):
+        if not key_terms:
+            return True  # nothing planet-specific was given to check against -- don't force a false failure
+        return any(term in text for term in key_terms)
+
+    raw_text = _make_one_call()
+    if not _is_grounded(raw_text):
+        print(f"[blend] response didn't reference any real ingredient content, retrying once. First attempt: {raw_text[:200]}")
+        raw_text = _make_one_call()
+    if not _is_grounded(raw_text):
+        print(f"[blend] still ungrounded after retry, raising for caller to handle. Retry attempt: {raw_text[:200]}")
+        raise RuntimeError("Model response didn't reference any of the given astrological content after a retry")
 
     # The regex-based AI-tell filter that used to live here -- stripping
     # specific banned words and phrases after the fact -- is gone.
@@ -776,38 +805,24 @@ def generate_integrated_vibe_of_day(day_result, natal_positions, natal_houses,
 
     try:
         result["message"] = _blend_vibe_ingredients(ingredients, api_key)
-        if _looks_like_meta_response(result["message"]):
-            print(f"[vibe-of-day] meta-response detected on first attempt, retrying. Original: {result['message'][:200]}")
-            result["message"] = _blend_vibe_ingredients(ingredients, api_key)  # one retry
-        if _looks_like_meta_response(result["message"]):
-            print(f"[vibe-of-day] meta-response detected again after retry, falling back to raw text. Retry output: {result['message'][:200]}")
-            result["message"] = " ".join(text for _, text in ingredients)
-            result["blend_failed"] = True
     except Exception as e:
         # Graceful fallback: real content, just not blended into one
         # voice -- still accurate, still useful, just less seamless.
-        # Logged with the real exception now -- this was previously a
-        # bare `except Exception:` with nothing printed, so a genuine
-        # API failure and a rare model slip were indistinguishable from
-        # the outside. Silent fallbacks are exactly what made the last
-        # issue take multiple rounds of guessing to pin down.
-        print(f"[vibe-of-day] blend call raised an exception, falling back to raw text: {type(e).__name__}: {e}")
+        # The grounding check and retry now happen inside the shared
+        # blend function itself, so every caller gets this protection
+        # uniformly, not just vibe of day -- this except block only
+        # sees it as a plain exception, same as a genuine network
+        # failure, and falls back the same way either way. Logged with
+        # the real exception so a genuine API failure and a model
+        # producing an ungrounded response stay distinguishable from
+        # the outside, instead of both disappearing into a silent
+        # fallback the way the very first version of this did.
+        print(f"[vibe-of-day] blend call failed, falling back to raw text: {type(e).__name__}: {e}")
         result["message"] = " ".join(text for _, text in ingredients)
         result["blend_failed"] = True
 
     return result
 
-
-def _looks_like_meta_response(message):
-    """Narrow check for the one specific failure shape seen in
-    practice: the model describing what it needs instead of writing
-    the reading. Deliberately conservative -- checks for phrasing that
-    would never appear in a genuine reading, not anything a real
-    reading might plausibly say, since a false positive here means
-    discarding a perfectly good reading."""
-    lowered = message.lower()
-    tells = ["i need the actual", "you've given me", "what's their chart", "give me the", "please provide"]
-    return any(tell in lowered for tell in tells)
 
 
 def generate_reading(day_result, natal_positions, natal_houses=None):

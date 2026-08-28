@@ -277,6 +277,7 @@ def get_year_ahead(req: YearAheadRequest):
             f"transits and dates, but what each real theme below is likely to bring up or require of them, "
             f"walked through in the order they happen across the year.",
             detailed=True,
+            interpretive=True,
         )
         return {"message": message, "themes": top_hits}
     except Exception as e:

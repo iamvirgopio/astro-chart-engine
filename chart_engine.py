@@ -594,9 +594,18 @@ def _blend_ingredients_into_answer(ingredients, task_instruction, question_conte
     bullet_list = "\n".join(f"- {text}" for _, text in ingredients)
     question_block = f'They asked: "{question_context}"\n\n' if question_context else ""
 
-    system_prompt = (
+    opening_instruction = (
+        f"You write {sentence_range} sentences of real, structured prose {task_instruction}, "
+        "based ONLY on the real astrological observations given below. Break it into short "
+        "paragraphs -- one per distinct time period or theme -- separated by a blank line "
+        "(an actual empty line between them, not just a line break), so a longer reading is "
+        "genuinely readable rather than one dense, unbroken wall of text.\n\n"
+        if interpretive else
         f"You write ONE short, cohesive paragraph ({sentence_range} sentences) {task_instruction}, "
         "based ONLY on the real astrological observations given below.\n\n"
+    )
+    system_prompt = (
+        opening_instruction +
         "You must ALWAYS produce the actual finished reading as your entire response -- never a "
         "question back, never a request for more placements, transits, or details, never a "
         "statement that you need more information before you can write it. There is no one on "
@@ -3154,6 +3163,14 @@ def blend_answer(ingredients, question_text, api_key=None, detailed=False, allow
         # for this case rather than raising the shared detailed default
         # for every other caller that doesn't need it.
         kwargs["max_tokens"] = max(kwargs.get("max_tokens", 300), 900)
+    if interpretive:
+        # A year-ahead reading with 8 real, distinct time periods needs
+        # more than the 6-10 sentence default sized for a handful of
+        # style ingredients -- each period needs its own real
+        # explanation, not a single clause, and the paragraph breaks
+        # requested above need room to actually breathe.
+        kwargs["sentence_range"] = "12-20"
+        kwargs["max_tokens"] = max(kwargs.get("max_tokens", 300), 1100)
     result = _blend_ingredients_into_answer(
         ingredients,
         task_instruction="directly answering their specific question",

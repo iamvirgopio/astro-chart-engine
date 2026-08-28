@@ -752,7 +752,14 @@ def _blend_ingredients_into_answer(ingredients, task_instruction, question_conte
         raw_text = _make_one_call()
     if not _is_grounded(raw_text):
         print(f"[blend] still ungrounded after retry, raising for caller to handle. Retry attempt: {raw_text[:200]}")
-        raise RuntimeError("Model response didn't reference any of the given astrological content after a retry")
+        # Deliberately unmistakable rather than a plain exception message
+        # -- this exact marker is a temporary diagnostic, not a
+        # permanent design choice. If this specific text is ever seen
+        # in the app, it proves definitively that this code path is
+        # the one actually running (ruling out a stale deploy), and
+        # that the grounding check is correctly catching a repeatedly-
+        # ungrounded response rather than letting it through unchanged.
+        raise RuntimeError("GROUNDING_CHECK_FAILED_TWICE: " + raw_text[:300])
 
     # The regex-based AI-tell filter that used to live here -- stripping
     # specific banned words and phrases after the fact -- is gone.

@@ -800,13 +800,33 @@ def generate_integrated_vibe_of_day(day_result, natal_positions, natal_houses,
     if base_reading["whats_off"]:
         ingredients.append(("transit_tense", base_reading["whats_off"]))
     phase_name = moon_phase_today["phase"]
-    if phase_name in MOON_PHASE_GUIDANCE:
-        ingredients.append(("moon_phase", f"The Moon is in its {phase_name} phase today -- {MOON_PHASE_GUIDANCE[phase_name]}."))
-    for planet in retrogrades_today:
-        if planet in RETROGRADE_DAY_GUIDANCE:
-            ingredients.append((f"retrograde_{planet}", f"{planet} is retrograde right now -- {RETROGRADE_DAY_GUIDANCE[planet]}."))
     if eclipse_today and eclipse_today["type"] in ECLIPSE_DAY_GUIDANCE:
+        # An eclipse only ever happens at a Full or New Moon -- a lunar
+        # eclipse IS a Full Moon, a solar eclipse IS a New Moon, not a
+        # separate coincidental event. Listing both was two ingredients
+        # describing the same moment from slightly different angles,
+        # adding redundant complexity without adding real information.
+        # The eclipse guidance is the more specific of the two, so it's
+        # the one kept.
         ingredients.append(("eclipse", f"Today's a {eclipse_today['type']} eclipse -- {ECLIPSE_DAY_GUIDANCE[eclipse_today['type']]}."))
+    elif phase_name in MOON_PHASE_GUIDANCE:
+        ingredients.append(("moon_phase", f"The Moon is in its {phase_name} phase today -- {MOON_PHASE_GUIDANCE[phase_name]}."))
+    # Retrogrades come last, and only the single most significant one --
+    # a genuinely busy day can have three or more active at once (an
+    # outer planet stays retrograde for months), and asking the model
+    # to synthesize ONE clear point out of 6-7 competing facts is a much
+    # harder task than out of 3-4. This was very likely the real cause
+    # of the model repeatedly failing to produce a grounded reading on
+    # a day with this many active ingredients -- not a fluke, and not
+    # something a retry with the identical prompt was ever going to fix.
+    # Saturn is prioritized first when present, since a Saturn transit
+    # tends to carry the most concrete, actionable weight of the three
+    # outer planets that go retrograde for long stretches.
+    if retrogrades_today:
+        priority_order = ["Saturn", "Pluto", "Neptune", "Uranus", "Jupiter"]
+        chosen = next((p for p in priority_order if p in retrogrades_today), retrogrades_today[0])
+        if chosen in RETROGRADE_DAY_GUIDANCE:
+            ingredients.append((f"retrograde_{chosen}", f"{chosen} is retrograde right now -- {RETROGRADE_DAY_GUIDANCE[chosen]}."))
 
     result = {"date": base_reading["date"], "score": base_reading["score"],
               "ingredients_used": [name for name, _ in ingredients]}

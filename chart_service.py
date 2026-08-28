@@ -199,6 +199,23 @@ class YearAheadRequest(BaseModel):
     year: int
 
 
+NATAL_PLANET_THEME = {
+    "Sun": "your core identity and sense of self",
+    "Moon": "your emotional needs and instincts",
+    "Mercury": "how you think, process, and communicate",
+    "Venus": "what you value and how you connect with others",
+    "Mars": "your drive, ambition, and how you assert yourself",
+    "Jupiter": "how you grow, take risks, and find meaning",
+    "Saturn": "your sense of structure, discipline, and long-term responsibility",
+    "Uranus": "your need for independence and authenticity",
+    "Neptune": "your ideals, intuition, and the parts of yourself that are hardest to pin down",
+    "Pluto": "your relationship with power, control, and deep transformation",
+    "Chiron": "an old wound you carry, and how you're learning to work with it rather than around it",
+    "North Node": "the direction you're meant to be growing toward, even when it's uncomfortable",
+}
+_NATAL_PLANET_THEME_DEFAULT = "a specific, real part of who you are"
+
+
 @app.post("/year-ahead")
 def get_year_ahead(req: YearAheadRequest):
     """The year's real, distinct outer-planet themes, written into one
@@ -208,20 +225,57 @@ def get_year_ahead(req: YearAheadRequest):
     content to write well."""
     try:
         hits = ce.scan_year_ahead(req.natal_chart["positions"], req.year, samples=52)
-        top_hits = hits[:6]
+
+        # Picking the 6 tightest hits overall, with no regard for WHEN
+        # they occur, can (and did) cluster every single one into the
+        # first third of the year while leaving the rest completely
+        # unmentioned -- not a genuine year-ahead overview. This
+        # guarantees at least one real theme per quarter when one
+        # exists, then fills any remaining slots with whatever's
+        # tightest overall, so a chart with one especially significant
+        # cluster still gets to show it.
+        quarters = [(1, 3), (4, 6), (7, 9), (10, 12)]
+        selected = []
+        remaining = list(hits)
+        for start_month, end_month in quarters:
+            for h in remaining:
+                hit_month = int(h["approx_date"][5:7])
+                if start_month <= hit_month <= end_month:
+                    selected.append(h)
+                    remaining.remove(h)
+                    break
+        for h in remaining:
+            if len(selected) >= 6:
+                break
+            selected.append(h)
+        top_hits = sorted(selected[:6], key=lambda h: h["approx_date"])
+
         ingredients = []
         for h in top_hits:
             framing = _ASPECT_FRAMING.get(h["aspect"], "a real alignment")
+            natal_theme = NATAL_PLANET_THEME.get(h["natal"], _NATAL_PLANET_THEME_DEFAULT)
+            transiting_theme = ce.OUTER_PLANET_CROSSING_MEANING.get(h["transiting"], "a real shift")
             month_name = h["approx_date"][:7]
+            # Real interpretive content now, not just the mechanical
+            # fact -- what the transiting planet generally brings,
+            # meeting what the natal planet actually represents for
+            # this person, framed by whether the aspect itself is
+            # supportive or tense. This is the substance an AI blend
+            # can actually turn into meaning; the bare fact alone
+            # ("Saturn opposes your natal Sun") gave it nothing to
+            # interpret beyond restating the fact itself.
             ingredients.append((
                 f"{h['transiting']}_{h['natal']}",
-                f"{h['transiting']} forms a {h['aspect']} to your natal {h['natal']}, closest around {month_name} -- {framing}."
+                f"{h['transiting']} forms a {h['aspect']} to your natal {h['natal']}, closest around {month_name} "
+                f"-- {framing}. {h['transiting']} brings {transiting_theme}, meeting {natal_theme}."
             ))
         if not ingredients:
             return {"message": "Nothing especially strong from the outer planets stands out this year -- a comparatively quiet one, astrologically."}
         message = ce.blend_answer(
             ingredients,
-            f"Give a genuine overview of what {req.year} looks like astrologically for this person, based on these real outer-planet transits across the year.",
+            f"Explain what {req.year} actually means for this person astrologically -- not a list of "
+            f"transits and dates, but what each real theme below is likely to bring up or require of them, "
+            f"walked through in the order they happen across the year.",
             detailed=True,
         )
         return {"message": message, "themes": top_hits}

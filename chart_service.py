@@ -229,15 +229,18 @@ def get_year_ahead(req: YearAheadRequest):
         # Picking the 6 tightest hits overall, with no regard for WHEN
         # they occur, can (and did) cluster every single one into the
         # first third of the year while leaving the rest completely
-        # unmentioned -- not a genuine year-ahead overview. This
-        # guarantees at least one real theme per quarter when one
-        # exists, then fills any remaining slots with whatever's
-        # tightest overall, so a chart with one especially significant
-        # cluster still gets to show it.
-        quarters = [(1, 3), (4, 6), (7, 9), (10, 12)]
+        # unmentioned -- not a genuine year-ahead overview. Six
+        # two-month buckets (not four quarters) each get a guaranteed
+        # pick when one exists, so late-year coverage can't come down
+        # to whichever single quarter-wide pick happened to land in
+        # its earliest month -- the actual reason November and
+        # December were going unmentioned even after the quarter fix.
+        # Two extra wildcard slots beyond the six guaranteed ones let
+        # an especially significant cluster still stand out fully.
+        buckets = [(1, 2), (3, 4), (5, 6), (7, 8), (9, 10), (11, 12)]
         selected = []
         remaining = list(hits)
-        for start_month, end_month in quarters:
+        for start_month, end_month in buckets:
             for h in remaining:
                 hit_month = int(h["approx_date"][5:7])
                 if start_month <= hit_month <= end_month:
@@ -245,10 +248,10 @@ def get_year_ahead(req: YearAheadRequest):
                     remaining.remove(h)
                     break
         for h in remaining:
-            if len(selected) >= 6:
+            if len(selected) >= 8:
                 break
             selected.append(h)
-        top_hits = sorted(selected[:6], key=lambda h: h["approx_date"])
+        top_hits = sorted(selected[:8], key=lambda h: h["approx_date"])
 
         ingredients = []
         for h in top_hits:

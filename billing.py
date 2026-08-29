@@ -438,6 +438,77 @@ def lookup_user(req: LookupUserRequest, authorization: str | None = Header(None)
     }
 
 
+@router.get("/admin/analytics")
+def get_analytics(authorization: str | None = Header(None)):
+    """Aggregate usage numbers pulled from data already being collected
+    for other reasons -- billing status, saved readings, chart
+    creation, referral activity -- not a new tracking system. Nothing
+    here is sold or shared outside the app; it's for deciding what to
+    build or fix next.
+    """
+    _verify_admin(authorization)
+
+    # Counted in Python rather than via a SQL GROUP BY -- Supabase's
+    # client doesn't expose grouped aggregates directly, and at the
+    # scale this app is actually at, fetching one column for every
+    # user and counting it here is simpler and completely fine. Worth
+    # revisiting with a real SQL aggregate if the user base gets large
+    # enough that fetching every row becomes wasteful.
+    users = _supabase_admin.table("users").select("subscription_status, created_at").execute()
+    status_counts: dict[str, int] = {}
+    for row in users.data or []:
+        status = row.get("subscription_status") or "free"
+        status_counts[status] = status_counts.get(status, 0) + 1
+    total_users = len(users.data or [])
+
+    now = datetime.datetime.now(datetime.timezone.utc)
+    signups_7d = 0
+    signups_30d = 0
+    for row in users.data or []:
+        created = row.get("created_at")
+        if not created:
+            continue
+        created_dt = datetime.datetime.fromisoformat(created.replace("Z", "+00:00"))
+        age_days = (now - created_dt).days
+        if age_days <= 7:
+            signups_7d += 1
+        if age_days <= 30:
+            signups_30d += 1
+
+    paid_statuses = {"active", "trial", "lifetime", "canceling", "past_due"}
+    paid_count = sum(count for status, count in status_counts.items() if status in paid_statuses)
+    conversion_rate = round(paid_count / total_users * 100, 1) if total_users else 0.0
+
+    charts = _supabase_admin.table("charts").select("chart_type").execute()
+    chart_type_counts: dict[str, int] = {}
+    for row in charts.data or []:
+        chart_type = row.get("chart_type") or "unknown"
+        chart_type_counts[chart_type] = chart_type_counts.get(chart_type, 0) + 1
+
+    saved = _supabase_admin.table("saved_readings").select("surface").execute()
+    saved_by_surface: dict[str, int] = {}
+    for row in saved.data or []:
+        surface = row.get("surface") or "unknown"
+        saved_by_surface[surface] = saved_by_surface.get(surface, 0) + 1
+
+    referral_rewards = _supabase_admin.table("admin_grant_log").select("id", count="exact").eq("action", "referral_reward").execute()
+    fraud_blocks = _supabase_admin.table("referral_fraud_blocks").select("id", count="exact").execute()
+    push_subs = _supabase_admin.table("push_subscriptions").select("user_id", count="exact").execute()
+
+    return {
+        "total_users": total_users,
+        "status_counts": status_counts,
+        "signups_7d": signups_7d,
+        "signups_30d": signups_30d,
+        "conversion_rate": conversion_rate,
+        "chart_type_counts": chart_type_counts,
+        "saved_readings_by_surface": saved_by_surface,
+        "referral_rewards_granted": referral_rewards.count or 0,
+        "referral_fraud_blocked": fraud_blocks.count or 0,
+        "push_subscribers": push_subs.count or 0,
+    }
+
+
 @router.get("/admin/users")
 def list_users(status: str | None = None, offset: int = 0, limit: int = 50, authorization: str | None = Header(None)):
     """Browses users -- filtered by status if given, or everyone (most

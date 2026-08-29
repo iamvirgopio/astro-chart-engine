@@ -170,17 +170,86 @@ def _grant_free_month(user_id: str, ref_row: dict) -> None:
         }).eq("id", user_id).execute()
 
 
-def _reward_referrer(referred_by_code: str) -> None:
+def _get_card_fingerprint(sub_id: str) -> str | None:
+    """Stripe's own fingerprint for the physical card behind a
+    subscription -- the same value across totally different Stripe
+    customers if it's genuinely the same card. Best-effort: returns
+    None on any failure rather than raising, since a fraud check that
+    can't determine an answer should never be allowed to block a
+    legitimate reward or crash the webhook that's also updating the
+    referred person's own subscription status.
+    """
+    try:
+        sub = stripe.Subscription.retrieve(sub_id, expand=["default_payment_method"])
+        pm = sub.get("default_payment_method")
+        if pm and pm.get("card"):
+            return pm["card"].get("fingerprint")
+        # Not every trial subscription has its own default_payment_method
+        # set -- falls back to the customer's own default payment method,
+        # which trial checkouts do require even when nothing is charged
+        # yet.
+        customer = stripe.Customer.retrieve(sub["customer"], expand=["invoice_settings.default_payment_method"])
+        pm2 = (customer.get("invoice_settings") or {}).get("default_payment_method")
+        if pm2 and pm2.get("card"):
+            return pm2["card"].get("fingerprint")
+    except Exception as e:
+        print(f"[referral] couldn't retrieve card fingerprint for {sub_id}, proceeding without a fraud check: {e}")
+    return None
+
+
+_REWARD_CAP_PER_30_DAYS = 5
+
+
+def _reward_referrer(referred_by_code: str, referred_user_id: str | None = None, referred_email: str | None = None, card_fingerprint: str | None = None) -> None:
     """Called once, the moment a referred person's first subscription
     actually starts -- not at signup, since rewarding on signup alone
-    (with no payment ever happening) would be trivially abusable."""
+    (with no payment ever happening) would be trivially abusable.
+
+    Two independent, location-blind fraud checks, neither depending on
+    IP address or network at all -- the actual exploit here is "one
+    person, several fake accounts, referred by themselves," which
+    works identically regardless of where the signups happen from:
+
+    1. Same card as the referrer -- Stripe's fingerprint catches this
+       directly, even across completely different emails and signup
+       times.
+    2. A rolling cap on how many rewards one account can earn in 30
+       days -- a hard ceiling on how much any single exploited pattern
+       can actually pay out, independent of how the abuse happens.
+    """
     referrer = _supabase_admin.table("users").select(
-        "id, subscription_status, stripe_subscription_id, subscription_current_period_end"
+        "id, email, subscription_status, stripe_subscription_id, subscription_current_period_end, stripe_card_fingerprint"
     ).eq("referral_code", referred_by_code).execute()
     if not referrer.data:
         return  # code didn't match anyone -- nothing to reward, fail quietly
     ref_row = referrer.data[0]
+
+    if card_fingerprint and referred_user_id:
+        _supabase_admin.table("users").update({"stripe_card_fingerprint": card_fingerprint}).eq("id", referred_user_id).execute()
+
+        if ref_row.get("stripe_card_fingerprint") and card_fingerprint == ref_row["stripe_card_fingerprint"]:
+            _supabase_admin.table("referral_fraud_blocks").insert({
+                "referrer_email": ref_row.get("email", ""), "referred_email": referred_email or "",
+                "reason": "same_card_as_referrer",
+            }).execute()
+            print(f"[referral] reward blocked -- referred account used the same card as the referrer ({ref_row.get('email')})")
+            return
+
+    thirty_days_ago = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=30)).isoformat()
+    recent_rewards = _supabase_admin.table("admin_grant_log").select("id").eq("target_email", ref_row.get("email", "")) \
+        .eq("action", "referral_reward").gte("created_at", thirty_days_ago).execute()
+    if len(recent_rewards.data or []) >= _REWARD_CAP_PER_30_DAYS:
+        _supabase_admin.table("referral_fraud_blocks").insert({
+            "referrer_email": ref_row.get("email", ""), "referred_email": referred_email or "",
+            "reason": "reward_cap_reached",
+        }).execute()
+        print(f"[referral] reward blocked -- {ref_row.get('email')} already hit the {_REWARD_CAP_PER_30_DAYS}-reward cap for the last 30 days")
+        return
+
     _grant_free_month(ref_row["id"], ref_row)
+    _supabase_admin.table("admin_grant_log").insert({
+        "target_email": ref_row.get("email", ""), "action": "referral_reward", "details": {"referred_email": referred_email},
+    }).execute()
 
 
 @router.get("/referral/my-code")
@@ -277,10 +346,16 @@ async def stripe_webhook(request: Request, stripe_signature: str | None = Header
         # also fires checkout-adjacent events in some flows) can never
         # reward the same referrer twice for the same person.
         if supabase_user_id:
-            user_row = _supabase_admin.table("users").select("referred_by_code, referral_reward_granted").eq("id", supabase_user_id).single().execute()
+            user_row = _supabase_admin.table("users").select("email, referred_by_code, referral_reward_granted").eq("id", supabase_user_id).single().execute()
             if user_row.data and user_row.data.get("referred_by_code") and not user_row.data.get("referral_reward_granted"):
                 try:
-                    _reward_referrer(user_row.data["referred_by_code"])
+                    card_fingerprint = _get_card_fingerprint(sub_id) if sub_id else None
+                    _reward_referrer(
+                        user_row.data["referred_by_code"],
+                        referred_user_id=supabase_user_id,
+                        referred_email=user_row.data.get("email"),
+                        card_fingerprint=card_fingerprint,
+                    )
                     _supabase_admin.table("users").update({"referral_reward_granted": True}).eq("id", supabase_user_id).execute()
                 except Exception as e:
                     print(f"[referral] reward failed for referrer of {supabase_user_id} (their own subscription still started fine): {e}")

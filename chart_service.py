@@ -7,9 +7,27 @@ Run locally with: uvicorn chart_service:app --reload --port 8001
 
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
+import os
+import sentry_sdk
 import chart_engine as ce
 import billing
 import push
+
+# Real error monitoring -- without this, the only way either of us
+# finds out something broke in production is a person telling us,
+# which is exactly what happened repeatedly tonight. SENTRY_DSN is set
+# in Railway's environment variables; if it's not set (e.g. running
+# locally), sentry_sdk.init with an empty dsn is a documented no-op --
+# it doesn't error, it just doesn't send anything anywhere.
+sentry_sdk.init(
+    dsn=os.environ.get("SENTRY_DSN", ""),
+    traces_sample_rate=0.1,
+    # Full request/response bodies can contain a person's birth data,
+    # their typed questions, or session tokens -- captured only at the
+    # point of an actual unhandled error for debugging it, not
+    # continuously logged as a matter of course.
+    send_default_pii=False,
+)
 
 app = FastAPI(title="Chart Engine Service")
 app.include_router(billing.router)

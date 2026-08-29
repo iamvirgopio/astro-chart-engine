@@ -197,6 +197,8 @@ _ASPECT_FRAMING = {
 class YearAheadRequest(BaseModel):
     natal_chart: dict
     year: int
+    subject_type: str = "personal"  # "personal" | "business"
+    subject_label: str | None = None  # the business's name, when subject_type == "business"
 
 
 NATAL_PLANET_THEME = {
@@ -215,6 +217,26 @@ NATAL_PLANET_THEME = {
 }
 _NATAL_PLANET_THEME_DEFAULT = "a specific, real part of who you are"
 
+# Mirrors the same convention already used for business charts in Ask
+# ("the business's natal X" rather than "your natal X") -- the same
+# planets, reframed around what each one represents for a business
+# specifically rather than a person.
+BUSINESS_PLANET_THEME = {
+    "Sun": "the business's core identity and brand",
+    "Moon": "the business's underlying culture and how it responds to change",
+    "Mercury": "its communication, marketing, and day-to-day operations",
+    "Venus": "its relationships with clients and partners, and its own brand appeal",
+    "Mars": "how assertively it competes and takes action",
+    "Jupiter": "where it finds real growth and opportunity",
+    "Saturn": "its structure, discipline, and long-term stability",
+    "Uranus": "its need to innovate, differentiate, or disrupt",
+    "Neptune": "its public image, ideals, and blind spots",
+    "Pluto": "power dynamics, competition, and deep transformation within it",
+    "Chiron": "a recurring vulnerability the business keeps circling back to",
+    "North Node": "the direction the business is meant to be growing toward",
+}
+_BUSINESS_PLANET_THEME_DEFAULT = "a specific, real part of how the business operates"
+
 
 @app.post("/year-ahead")
 def get_year_ahead(req: YearAheadRequest):
@@ -222,8 +244,16 @@ def get_year_ahead(req: YearAheadRequest):
     genuine overview via the same shared blend function every other
     reading in the app uses -- not hand-written content for every
     possible planet combination, which isn't a tractable amount of
-    content to write well."""
+    content to write well. Works identically for a business chart --
+    the underlying scan doesn't care whose chart it's given, only the
+    interpretive framing below changes."""
     try:
+        is_business = req.subject_type == "business"
+        theme_dict = BUSINESS_PLANET_THEME if is_business else NATAL_PLANET_THEME
+        theme_default = _BUSINESS_PLANET_THEME_DEFAULT if is_business else _NATAL_PLANET_THEME_DEFAULT
+        subject_noun = f'"{req.subject_label}"' if (is_business and req.subject_label) else ("the business" if is_business else "this person")
+        possessive = "its" if is_business else "your"
+
         hits = ce.scan_year_ahead(req.natal_chart["positions"], req.year, samples=52)
 
         # Picking the 6 tightest hits overall, with no regard for WHEN
@@ -256,28 +286,28 @@ def get_year_ahead(req: YearAheadRequest):
         ingredients = []
         for h in top_hits:
             framing = _ASPECT_FRAMING.get(h["aspect"], "a real alignment")
-            natal_theme = NATAL_PLANET_THEME.get(h["natal"], _NATAL_PLANET_THEME_DEFAULT)
+            natal_theme = theme_dict.get(h["natal"], theme_default)
             transiting_theme = ce.OUTER_PLANET_CROSSING_MEANING.get(h["transiting"], "a real shift")
             month_name = h["approx_date"][:7]
             # Real interpretive content now, not just the mechanical
             # fact -- what the transiting planet generally brings,
             # meeting what the natal planet actually represents for
-            # this person, framed by whether the aspect itself is
+            # this subject, framed by whether the aspect itself is
             # supportive or tense. This is the substance an AI blend
             # can actually turn into meaning; the bare fact alone
             # ("Saturn opposes your natal Sun") gave it nothing to
             # interpret beyond restating the fact itself.
             ingredients.append((
                 f"{h['transiting']}_{h['natal']}",
-                f"{h['transiting']} forms a {h['aspect']} to your natal {h['natal']}, closest around {month_name} "
+                f"{h['transiting']} forms a {h['aspect']} to {possessive} natal {h['natal']}, closest around {month_name} "
                 f"-- {framing}. {h['transiting']} brings {transiting_theme}, meeting {natal_theme}."
             ))
         if not ingredients:
             return {"message": "Nothing especially strong from the outer planets stands out this year -- a comparatively quiet one, astrologically."}
         message = ce.blend_answer(
             ingredients,
-            f"Explain what {req.year} actually means for this person astrologically -- not a list of "
-            f"transits and dates, but what each real theme below is likely to bring up or require of them, "
+            f"Explain what {req.year} actually means for {subject_noun} astrologically -- not a list of "
+            f"transits and dates, but what each real theme below is likely to bring up or require, "
             f"walked through in the order they happen across the year.",
             detailed=True,
             interpretive=True,

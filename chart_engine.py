@@ -81,6 +81,38 @@ def resolve_utc_offset(year, month, day, hour, minute, lat, lon):
     return offset.total_seconds() / 3600.0, tz_name
 
 
+def find_solar_return_jd(natal_sun_longitude, year, approx_month, approx_day):
+    """Finds the exact Julian Day (UT) when the transiting Sun returns to
+    the exact natal Sun longitude within the given year -- the defining
+    moment of a Solar Return chart. The Sun moves steadily forward and
+    never retrogrades, unlike every other planet, which is what makes a
+    plain binary search reliable here -- there's only ever one crossing
+    to find, never multiple candidates to choose between. Always falls
+    within a day or two of the actual birthday.
+    """
+    center_jd = julian_day_utc(year, approx_month, approx_day, 12, 0, 0)
+    lo, hi = center_jd - 3, center_jd + 3
+
+    def sun_diff(jd):
+        sun_lon = compute_positions(jd)["Sun"]["longitude"]
+        return (sun_lon - natal_sun_longitude + 180) % 360 - 180
+
+    if sun_diff(lo) > 0 or sun_diff(hi) < 0:
+        # Extremely unlikely given the window and the Sun's steady
+        # ~1-degree-a-day motion, but widen once and re-check rather
+        # than silently trust a search that was never actually
+        # bracketing the real crossing.
+        lo, hi = center_jd - 10, center_jd + 10
+
+    for _ in range(50):
+        mid = (lo + hi) / 2
+        if sun_diff(mid) < 0:
+            lo = mid
+        else:
+            hi = mid
+    return hi
+
+
 def julian_day_utc(year, month, day, hour, minute, utc_offset_hours):
     """
     hour/minute are LOCAL time at birth; utc_offset_hours is what to subtract
@@ -3319,6 +3351,66 @@ def _apply_draconic_shift(result, offset):
     return result
 
 
+def compute_chart_from_jd_ut(jd_ut, lat, lon, chart_system="western", unknown_time=False):
+    """The actual chart-assembly logic (positions, houses/angles, Part of
+    Fortune, decans) factored out from compute_chart() so it can be
+    reused when the exact UTC moment is already known -- a Solar
+    Return, for instance, where the moment comes from an astronomical
+    search, not from a local birth date/time that still needs its
+    historical UTC offset resolved. Calling compute_chart() itself for
+    a case like that would be wrong: it unconditionally resolves ITS
+    OWN local-time-to-UTC offset for the given lat/lon, which would
+    treat an already-UTC moment as if it were local time at that
+    location and shift it a second time.
+    """
+    zodiac = "sidereal" if chart_system == "vedic" else "tropical"
+    positions = compute_positions(jd_ut, zodiac=zodiac)
+
+    if chart_system == "vedic":
+        for name, data in positions.items():
+            if name == "_skipped":
+                continue
+            data["nakshatra"] = which_nakshatra(data["longitude"])
+
+    result = {
+        "julian_day_ut": jd_ut,
+        "chart_system": chart_system,
+        "zodiac": zodiac,
+        "positions": positions,
+        "houses_and_angles": None,
+        "part_of_fortune": None,
+        "time_known": not unknown_time,
+    }
+
+    if not unknown_time:
+        angles = compute_angles_and_houses(jd_ut, lat, lon, zodiac=zodiac)
+        result["houses_and_angles"] = angles
+
+        house_system_for_day_check = "whole_sign" if chart_system == "vedic" else "placidus"
+        houses_for_check = angles[house_system_for_day_check]["houses"]
+        sun_house = which_house(positions["Sun"]["longitude"], houses_for_check)
+        is_day_chart = sun_house >= 7
+        asc_lon = angles[house_system_for_day_check]["ascendant"]["longitude"]
+        pof_lon = compute_part_of_fortune(positions["Sun"]["longitude"], positions["Moon"]["longitude"], asc_lon, is_day_chart)
+        pof_sign, pof_deg = deg_to_sign(pof_lon)
+        result["part_of_fortune"] = {"longitude": round(pof_lon, 4), "sign": pof_sign, "degree_in_sign": pof_deg}
+        if chart_system == "vedic":
+            result["part_of_fortune"]["nakshatra"] = which_nakshatra(pof_lon)
+
+    if chart_system == "draconic":
+        node_lon = positions["North Node"]["longitude"]
+        result = _apply_draconic_shift(result, node_lon)
+
+    for name, data in result["positions"].items():
+        if name == "_skipped":
+            continue
+        data["decan"] = which_decan(data["longitude"])
+    if result["part_of_fortune"]:
+        result["part_of_fortune"]["decan"] = which_decan(result["part_of_fortune"]["longitude"])
+
+    return result
+
+
 def compute_chart(year, month, day, hour, minute, lat, lon, unknown_time=False, chart_system="western"):
     """
     Main entry point. Caller supplies LOCAL birth date/time + coordinates —
@@ -3343,59 +3435,10 @@ def compute_chart(year, month, day, hour, minute, lat, lon, unknown_time=False, 
     if unknown_time:
         hour, minute = 12, 0
 
-    zodiac = "sidereal" if chart_system == "vedic" else "tropical"
-
     utc_offset_hours, tz_name = resolve_utc_offset(year, month, day, hour, minute, lat, lon)
     jd_ut = julian_day_utc(year, month, day, hour, minute, utc_offset_hours)
-    positions = compute_positions(jd_ut, zodiac=zodiac)
 
-    if chart_system == "vedic":
-        for name, data in positions.items():
-            if name == "_skipped":
-                continue
-            data["nakshatra"] = which_nakshatra(data["longitude"])
-
-    result = {
-        "julian_day_ut": jd_ut,
-        "timezone": tz_name,
-        "utc_offset_hours": utc_offset_hours,
-        "chart_system": chart_system,
-        "zodiac": zodiac,
-        "positions": positions,
-        "houses_and_angles": None,
-        "part_of_fortune": None,
-        "time_known": not unknown_time,
-    }
-
-    if not unknown_time:
-        angles = compute_angles_and_houses(jd_ut, lat, lon, zodiac=zodiac)
-        result["houses_and_angles"] = angles
-
-        # Part of Fortune needs Sun, Moon, Ascendant, and which side of the
-        # horizon the Sun is on -- all now available.
-        house_system_for_day_check = "whole_sign" if chart_system == "vedic" else "placidus"
-        houses_for_check = angles[house_system_for_day_check]["houses"]
-        sun_house = which_house(positions["Sun"]["longitude"], houses_for_check)
-        is_day_chart = sun_house >= 7
-        asc_lon = angles[house_system_for_day_check]["ascendant"]["longitude"]
-        pof_lon = compute_part_of_fortune(positions["Sun"]["longitude"], positions["Moon"]["longitude"], asc_lon, is_day_chart)
-        pof_sign, pof_deg = deg_to_sign(pof_lon)
-        result["part_of_fortune"] = {"longitude": round(pof_lon, 4), "sign": pof_sign, "degree_in_sign": pof_deg}
-        if chart_system == "vedic":
-            result["part_of_fortune"]["nakshatra"] = which_nakshatra(pof_lon)
-
-    if chart_system == "draconic":
-        # The whole chart above was computed tropically (draconic isn't a
-        # zodiac variant at the calc_ut level like sidereal is -- it's a
-        # shift applied AFTER, using this chart's own North Node).
-        node_lon = positions["North Node"]["longitude"]
-        result = _apply_draconic_shift(result, node_lon)
-
-    for name, data in result["positions"].items():
-        if name == "_skipped":
-            continue
-        data["decan"] = which_decan(data["longitude"])
-    if result["part_of_fortune"]:
-        result["part_of_fortune"]["decan"] = which_decan(result["part_of_fortune"]["longitude"])
-
+    result = compute_chart_from_jd_ut(jd_ut, lat, lon, chart_system=chart_system, unknown_time=unknown_time)
+    result["timezone"] = tz_name
+    result["utc_offset_hours"] = utc_offset_hours
     return result

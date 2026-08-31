@@ -544,6 +544,12 @@ class BlendAnswerRequest(BaseModel):
     # general model knowledge won't always cover well, especially for
     # less-famous places.
     allow_web_search: bool = False
+    # Genuine, explanatory multi-paragraph prose (Year Ahead's voice)
+    # rather than the terse concrete-facts default -- needed for
+    # anything reading a whole chart's worth of placements as one
+    # cohesive interpretation, like a Solar Return or Composite chart,
+    # rather than answering one specific question.
+    interpretive: bool = False
 
 
 @app.post("/blend-answer")
@@ -554,7 +560,7 @@ def get_blended_answer(req: BlendAnswerRequest):
     returns one direct, cohesive answer to the actual question asked."""
     try:
         ingredient_tuples = [(item[0], item[1]) for item in req.ingredients]
-        message = ce.blend_answer(ingredient_tuples, req.question, detailed=req.detailed, allow_web_search=req.allow_web_search)
+        message = ce.blend_answer(ingredient_tuples, req.question, detailed=req.detailed, allow_web_search=req.allow_web_search, interpretive=req.interpretive)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"message": message}

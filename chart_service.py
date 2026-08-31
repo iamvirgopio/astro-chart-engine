@@ -87,8 +87,13 @@ class ChartRequest(BaseModel):
     year: int
     month: int = Field(ge=1, le=12)
     day: int = Field(ge=1, le=31)
-    hour: int = Field(ge=0, le=23, default=12)
-    minute: int = Field(ge=0, le=59, default=0)
+    # Genuinely optional -- an unknown-birth-time chart stores these as
+    # null, and compute_chart() already correctly ignores whatever's
+    # passed here and defaults to noon whenever unknown_time is True.
+    # Requiring a real int here rejected that exact, valid case outright
+    # with a 422 before the request ever reached that logic at all.
+    hour: int | None = Field(ge=0, le=23, default=12)
+    minute: int | None = Field(ge=0, le=59, default=0)
     lat: float = Field(ge=-90, le=90)
     lon: float = Field(ge=-180, le=180)
     unknown_time: bool = False
@@ -100,7 +105,13 @@ def get_chart(req: ChartRequest):
     try:
         result = ce.compute_chart(
             year=req.year, month=req.month, day=req.day,
-            hour=req.hour, minute=req.minute,
+            # Falls back to noon if somehow None while unknown_time is
+            # False too -- an invalid combination that shouldn't occur
+            # in practice, but compute_chart() does real arithmetic with
+            # these values in that case, unlike the unknown_time=True
+            # path, so this guards it defensively rather than assume.
+            hour=req.hour if req.hour is not None else 12,
+            minute=req.minute if req.minute is not None else 0,
             lat=req.lat, lon=req.lon,
             unknown_time=req.unknown_time,
             chart_system=req.chart_system,

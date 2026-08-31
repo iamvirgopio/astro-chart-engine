@@ -112,6 +112,32 @@ def get_chart(req: ChartRequest):
     return result
 
 
+class SolarReturnRequest(BaseModel):
+    natal_chart: dict  # needs .positions.Sun.longitude
+    birth_month: int = Field(ge=1, le=12)
+    birth_day: int = Field(ge=1, le=31)
+    year: int
+    lat: float = Field(ge=-90, le=90)
+    lon: float = Field(ge=-180, le=180)
+
+
+@app.post("/solar-return")
+def get_solar_return(req: SolarReturnRequest):
+    """A Solar Return chart -- cast for the exact moment the transiting
+    Sun returns to the person's natal Sun degree, at wherever they'll
+    actually be that year, not their birthplace. Traditionally read as
+    its own chart for what that specific year holds, distinct from a
+    transit-based year-ahead overview."""
+    try:
+        natal_sun_lon = req.natal_chart["positions"]["Sun"]["longitude"]
+        sr_jd = ce.find_solar_return_jd(natal_sun_lon, req.year, req.birth_month, req.birth_day)
+        chart = ce.compute_chart_from_jd_ut(sr_jd, req.lat, req.lon)
+        chart["exact_moment_utc"] = ce.jd_to_iso_utc(sr_jd)
+        return chart
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}

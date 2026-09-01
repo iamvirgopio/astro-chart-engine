@@ -3267,18 +3267,28 @@ def blend_answer(ingredients, question_text, api_key=None, detailed=False, allow
         # for every other caller that doesn't need it.
         kwargs["max_tokens"] = max(kwargs.get("max_tokens", 300), 900)
     if interpretive:
-        # A year-ahead reading with 8 real, distinct time periods needs
-        # real room -- each theme genuinely warrants 3-5 sentences of
-        # actual explanation (mechanism, meaning, what to do about it),
-        # not a single clause. 12-20 was tried first and the model
-        # consistently ran well past it anyway once given 8 substantial
-        # themes to properly interpret -- the real length needed is
-        # closer to 25-40 sentences, and the token budget is set
-        # generously above that estimate specifically so a genuinely
-        # long response finishes its last sentence instead of being cut
-        # off mid-word, which happened at the previous, tighter budget.
-        kwargs["sentence_range"] = "25-40"
-        kwargs["max_tokens"] = max(kwargs.get("max_tokens", 300), 2400)
+        # Length scales with how much there actually is to interpret,
+        # rather than a single fixed range for every caller. A
+        # year-ahead reading with 8 real, distinct time periods
+        # genuinely needs room -- 3-5 sentences per theme to cover the
+        # mechanism, the meaning, and what to do about it. A 3-card
+        # tarot spread interpreting the same way needs a fraction of
+        # that; forcing it into the same fixed range that was tuned for
+        # 8 themes is exactly how a spread meant to be direct and
+        # decisive turns into an unrelated wall of text. The scaling
+        # below reproduces the original 25-40 sentence range almost
+        # exactly at 8 ingredients (24-40), so year-ahead's own tuning
+        # is preserved -- everything else now scales proportionally
+        # from that same anchor instead of inheriting its number
+        # regardless of size.
+        low = max(8, len(ingredients) * 3)
+        high = max(15, len(ingredients) * 5)
+        kwargs["sentence_range"] = f"{low}-{high}"
+        # Generous headroom above the high end specifically so a
+        # genuinely long response finishes its last sentence instead of
+        # being cut off mid-word, the same failure this was already
+        # tuned to avoid once before.
+        kwargs["max_tokens"] = max(kwargs.get("max_tokens", 300), high * 75 + 300)
     result = _blend_ingredients_into_answer(
         ingredients,
         task_instruction="directly answering their specific question",

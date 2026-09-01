@@ -1733,6 +1733,65 @@ def classify_open_question(question_text, valid_lenses, context_description, api
     return result
 
 
+def classify_question_multi_lens(question_text, valid_lenses, context_description, target_count=3, api_key=None):
+    """A genuinely separate function from classify_open_question, not a
+    parameter added to it -- that function is single-choice by design
+    (one lens, used correctly by synastry and location routing today),
+    and forcing multi-select through it would risk those working
+    callers for a need only this one has. Built specifically for the
+    Chart & Cards tarot spread: mapping a free-text question to the
+    small set of real chart placements it's actually about (a money
+    question -> 2nd house, 8th house, Part of Fortune), not just one.
+    """
+    import os, json as jsonlib, re
+    key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+    if not key:
+        raise RuntimeError("No Anthropic API key configured")
+
+    system_prompt = (
+        f"You map a person's question about {context_description} to the {target_count} most "
+        f"relevant items from this list: {', '.join(valid_lenses)}.\n"
+        f"Pick real, specific relevance -- not a generic default set repeated for every question.\n"
+        f'Return ONLY valid JSON: {{"lenses": ["<item>", "<item>", ...]}}, with exactly '
+        f"{target_count} items, all from the list given.\n"
+        f"No markdown, no explanation, just the JSON object."
+    )
+
+    import urllib.request
+    payload = jsonlib.dumps({
+        "model": "claude-haiku-4-5-20251001",
+        "max_tokens": 150,
+        "system": system_prompt,
+        "messages": [{"role": "user", "content": question_text}],
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages",
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "x-api-key": key,
+            "anthropic-version": "2023-06-01",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        body = jsonlib.loads(resp.read())
+    text = body["content"][0]["text"].strip()
+    text = re.sub(r"^```(json)?|```$", "", text.strip(), flags=re.MULTILINE).strip()
+    result = jsonlib.loads(text)
+
+    # Same defensive pattern as the single-lens version -- never trust
+    # the model to have stayed perfectly inside the given list or
+    # returned the exact count asked for.
+    lenses = [l for l in result.get("lenses", []) if l in valid_lenses]
+    if len(lenses) < target_count:
+        for fallback in valid_lenses:
+            if fallback not in lenses:
+                lenses.append(fallback)
+            if len(lenses) >= target_count:
+                break
+    return {"lenses": lenses[:target_count]}
+
+
 def _lon_diff(lon1, lon2):
     d = (lon1 - lon2) % 360
     return d - 360 if d > 180 else d

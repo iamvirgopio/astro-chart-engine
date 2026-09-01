@@ -230,6 +230,33 @@ def get_today_transits(req: TransitsForDateRequest):
         )
         day_result = {"date": target.isoformat(), "score": score, "hits": hits}
         reading = ce.generate_reading(day_result, req.natal_chart["positions"], natal_houses)
+
+        # Additive only -- reading's own why/whats_off text is untouched,
+        # this just also exposes the same top hits as raw structured
+        # data (transiting/natal/aspect) rather than already-phrased
+        # text, for callers that need to do their own lookup against a
+        # hit (e.g. mapping today's transiting planet to a matching
+        # crystal) rather than just display generate_reading's prose.
+        favorable_hits = [h for h in hits if h["aspect"] in ce.FAVORABLE]
+        tense_hits = [h for h in hits if h["aspect"] in ce.TENSE]
+        reading["top_favorable_hit"] = max(favorable_hits, key=lambda h: h["weight"]) if favorable_hits else None
+        reading["top_tense_hit"] = max(tense_hits, key=lambda h: h["weight"]) if tense_hits else None
+        # All hits, not just the single top one -- a caller matching
+        # hits against a smaller, curated set of content (crystals,
+        # for instance, which don't cover every calculated point like
+        # Black Moon Lilith or the South Node) needs the option to pick
+        # the best-covered hit rather than being stuck with whichever
+        # one happened to score highest overall, even if nothing in
+        # its own content actually corresponds to it.
+        reading["favorable_hits"] = sorted(favorable_hits, key=lambda h: h["weight"], reverse=True)
+        reading["tense_hits"] = sorted(tense_hits, key=lambda h: h["weight"], reverse=True)
+        # A guaranteed fallback fact -- the Moon's current sign needs no
+        # aspect to exist at all, unlike every hit above. On a
+        # genuinely quiet day (or one where the only real aspects
+        # happen to be conjunctions, which count as neither favorable
+        # nor tense), this is what keeps a caller like the daily
+        # crystal pairing from ever coming up completely empty.
+        reading["transiting_moon_sign"] = target_positions["Moon"]["sign"]
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     return reading

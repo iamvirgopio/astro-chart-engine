@@ -113,6 +113,45 @@ def find_solar_return_jd(natal_sun_longitude, year, approx_month, approx_day):
     return hi
 
 
+# Cross-quarter days -- real, fixed calendar dates by tradition, not
+# tied to a specific solar longitude the way solstices/equinoxes are.
+_SABBATS_FIXED = {
+    (2, 1): "Imbolc",
+    (5, 1): "Beltane",
+    (8, 1): "Lughnasadh",
+    (10, 31): "Samhain",
+}
+
+# (target Sun longitude, approx month, approx day, name) -- these 4
+# genuinely shift by a day or so year to year, since they're the actual
+# moment the Sun crosses an exact point, not a fixed calendar date.
+_SABBATS_SOLAR = {
+    0: (3, 20, "Ostara (Spring Equinox)"),
+    90: (6, 21, "Litha (Summer Solstice)"),
+    180: (9, 22, "Mabon (Fall Equinox)"),
+    270: (12, 21, "Yule (Winter Solstice)"),
+}
+
+
+def wheel_of_year_events(year):
+    """The 8 sabbats of the Wheel of the Year for a given calendar year.
+    The 4 solar ones are computed as the real, exact moment the Sun
+    crosses that point -- reusing the identical search find_solar_return_jd
+    already does for a Solar Return chart, just against a fixed
+    reference point (0/90/180/270 degrees) instead of a person's own
+    natal degree. The 4 cross-quarter days are real, fixed calendar
+    dates by tradition, so those need no search at all.
+    """
+    events = []
+    for (month, day), name in _SABBATS_FIXED.items():
+        events.append({"name": name, "date": f"{year:04d}-{month:02d}-{day:02d}", "exact_moment": False})
+    for target_lon, (approx_month, approx_day, name) in _SABBATS_SOLAR.items():
+        jd = find_solar_return_jd(target_lon, year, approx_month, approx_day)
+        events.append({"name": name, "date": jd_to_iso_utc(jd), "exact_moment": True})
+    events.sort(key=lambda e: e["date"])
+    return events
+
+
 def julian_day_utc(year, month, day, hour, minute, utc_offset_hours):
     """
     hour/minute are LOCAL time at birth; utc_offset_hours is what to subtract
@@ -1597,8 +1636,24 @@ def calendar_range(start_year, start_month, start_day, num_days, natal_positions
     eclipses = find_eclipses_in_range(start_jd, end_jd)
     eclipses_out = [{"type": e["type"], "date": jd_to_iso_utc(e["jd"])[:10]} for e in eclipses]
 
+    # Computed for every year the requested range touches (a range near
+    # December 31st could span into the next year) and filtered down to
+    # just the ones actually inside [start_jd, end_jd) -- the same
+    # range-filtering pattern already used for void periods and
+    # eclipses above, just for a universal, chart-independent event
+    # instead of a chart-scored one.
+    years_touched = {start.year, (start + datetime.timedelta(days=num_days)).year}
+    sabbats_out = []
+    for yr in years_touched:
+        for event in wheel_of_year_events(yr):
+            event_jd = julian_day_utc(int(event["date"][:4]), int(event["date"][5:7]), int(event["date"][8:10]), 12, 0, 0)
+            if start_jd <= event_jd < end_jd:
+                sabbats_out.append(event)
+    sabbats_out.sort(key=lambda e: e["date"])
+
     return {"days": days, "void_periods": void_periods_out,
-            "retrograde_periods": retro_out, "eclipses": eclipses_out}
+            "retrograde_periods": retro_out, "eclipses": eclipses_out,
+            "sabbats": sabbats_out}
 
 
 def compute_astrocartography_lines(jd_ut, lat_range=(-66, 66), lat_step=2):

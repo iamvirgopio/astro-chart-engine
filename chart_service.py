@@ -542,6 +542,29 @@ class ClassifyQuestionRequest(BaseModel):
     context_description: str
 
 
+class ClassifyQuestionMultiRequest(BaseModel):
+    question: str
+    valid_lenses: list[str]
+    context_description: str
+    target_count: int = 3
+
+
+@app.post("/classify-question-multi")
+def classify_question_multi_endpoint(req: ClassifyQuestionMultiRequest):
+    """Separate endpoint from /classify-question for the same reason
+    the underlying function is separate -- Chart & Cards needs several
+    relevant houses per question, not one, and this keeps that need
+    from ever touching the single-lens path other features depend on."""
+    try:
+        result = ce.classify_question_multi_lens(
+            question_text=req.question, valid_lenses=req.valid_lenses,
+            context_description=req.context_description, target_count=req.target_count,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return result
+
+
 class BlendAnswerRequest(BaseModel):
     ingredients: list[list[str]]  # [[label, text], [label, text], ...]
     question: str

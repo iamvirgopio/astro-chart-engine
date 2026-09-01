@@ -248,7 +248,19 @@ def send_daily(x_cron_secret: str | None = Header(None, alias="X-Cron-Secret")):
         try:
             billing._grant_free_month(user_id, user_row.data)
             _supabase_admin.table("users").update({"last_birthday_gift_year": today.year}).eq("id", user_id).execute()
-            birthday_messages[user_id] = "Happy birthday! We added a free month to your account as a gift."
+            # _grant_free_month silently no-ops for a lifetime member --
+            # correct, since they don't need or benefit from a free
+            # month -- but the message here was being sent unconditionally,
+            # meaning a lifetime member would get a birthday notification
+            # falsely claiming a free month had just been added when
+            # nothing was actually granted. Checked explicitly here
+            # instead of relying on the shared function to report back
+            # whether it did anything, since changing its return value
+            # would also affect the referral reward path that calls it.
+            if user_row.data.get("subscription_status") == "lifetime":
+                birthday_messages[user_id] = "Happy birthday!"
+            else:
+                birthday_messages[user_id] = "Happy birthday! We added a free month to your account as a gift."
         except Exception as e:
             print(f"[push] couldn't grant birthday gift for user {user_id}: {e}")
 

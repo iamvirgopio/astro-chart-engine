@@ -3555,3 +3555,32 @@ def compute_chart(year, month, day, hour, minute, lat, lon, unknown_time=False, 
     result["timezone"] = tz_name
     result["utc_offset_hours"] = utc_offset_hours
     return result
+
+
+def compute_progressed_positions(birth_jd_ut, target_jd_ut):
+    """Secondary progressions via the standard 'day for a year' method:
+    age in years since birth becomes a day-offset from the birth
+    moment, and that resulting date's real planetary positions are the
+    progressed chart. Verified against a real example before trusting
+    it: the progressed Sun moves close to 1 degree per progressed year
+    (matching its real ~1 degree/day motion), and the progressed Moon
+    -- which moves roughly 13 degrees/day -- laps the whole zodiac
+    roughly once every 27-28 progressed years, both consistent with
+    how secondary progressions actually behave.
+
+    Deliberately returns positions only, not houses/angles -- real
+    astrological practice disagrees on how to progress the houses
+    themselves (several distinct, debated methods exist), while
+    reading progressed planets against the person's own NATAL houses
+    is the simpler, far more broadly agreed-upon approach. The caller
+    is expected to determine house placement using the person's
+    existing natal chart, not a second set of progressed houses.
+    """
+    age_in_years = (target_jd_ut - birth_jd_ut) / 365.25
+    progressed_jd = birth_jd_ut + age_in_years
+    positions = compute_positions(progressed_jd)
+    for name, data in positions.items():
+        if name == "_skipped":
+            continue
+        data["decan"] = which_decan(data["longitude"])
+    return {"progressed_jd_ut": progressed_jd, "age_in_years": round(age_in_years, 2), "positions": positions}

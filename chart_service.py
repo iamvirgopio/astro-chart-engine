@@ -13,7 +13,7 @@ import chart_engine as ce
 import billing
 import push
 
-# Real error monitoring -- without this, the only way either of us
+# Real error monitoring—without this, the only way either of us
 # finds out something broke in production is a person telling us,
 # which is exactly what happened repeatedly tonight. SENTRY_DSN is set
 # in Railway's environment variables; if it's not set (e.g. running
@@ -23,7 +23,7 @@ sentry_sdk.init(
     dsn=os.environ.get("SENTRY_DSN", ""),
     traces_sample_rate=0.1,
     # Full request/response bodies can contain a person's birth data,
-    # their typed questions, or session tokens -- captured only at the
+    # their typed questions, or session tokens—captured only at the
     # point of an actual unhandled error for debugging it, not
     # continuously logged as a matter of course.
     send_default_pii=False,
@@ -37,7 +37,7 @@ app.include_router(push.router)
 def _real_client_ip(request: Request) -> str:
     """Railway (and most reverse proxies) sit in front of this app, so
     request.client.host alone would report the proxy's own address for
-    every single request, not the actual visitor -- X-Forwarded-For is
+    every single request, not the actual visitor—X-Forwarded-For is
     where the real origin IP actually shows up. Falls back to
     request.client.host only if that header is genuinely absent."""
     forwarded = request.headers.get("x-forwarded-for")
@@ -53,7 +53,7 @@ _SIGNUP_IP_WINDOW_HOURS = 24
 @app.post("/signup/check-rate-limit")
 def check_signup_rate_limit(request: Request):
     """Called by the frontend BEFORE actually creating a Supabase
-    account -- rate-limits by IP within a time window rather than a
+    account—rate-limits by IP within a time window rather than a
     lifetime one-email-per-IP block. A hard lifetime block would punish
     every legitimate household, office, or mobile carrier's customers
     who happen to share a public IP with someone who already signed up
@@ -77,7 +77,7 @@ def check_signup_rate_limit(request: Request):
 
     recent = supabase_admin.table("signup_ip_log").select("id").eq("ip_address", ip).gte("created_at", cutoff).execute()
     if len(recent.data or []) >= _SIGNUP_IP_LIMIT:
-        raise HTTPException(status_code=429, detail="Too many accounts created recently from this connection -- try again later.")
+        raise HTTPException(status_code=429, detail="Too many accounts created recently from this connection—try again later.")
 
     supabase_admin.table("signup_ip_log").insert({"ip_address": ip}).execute()
     return {"allowed": True}
@@ -87,7 +87,7 @@ class ChartRequest(BaseModel):
     year: int
     month: int = Field(ge=1, le=12)
     day: int = Field(ge=1, le=31)
-    # Genuinely optional -- an unknown-birth-time chart stores these as
+    # Genuinely optional—an unknown-birth-time chart stores these as
     # null, and compute_chart() already correctly ignores whatever's
     # passed here and defaults to noon whenever unknown_time is True.
     # Requiring a real int here rejected that exact, valid case outright
@@ -106,7 +106,7 @@ def get_chart(req: ChartRequest):
         result = ce.compute_chart(
             year=req.year, month=req.month, day=req.day,
             # Falls back to noon if somehow None while unknown_time is
-            # False too -- an invalid combination that shouldn't occur
+            # False too—an invalid combination that shouldn't occur
             # in practice, but compute_chart() does real arithmetic with
             # these values in that case, unlike the unknown_time=True
             # path, so this guards it defensively rather than assume.
@@ -151,7 +151,7 @@ def get_progressions(req: ProgressionsRequest):
             target_jd_ut = ce.julian_day_utc(today.year, today.month, today.day, 12, 0, 0)
         result = ce.compute_progressed_positions(birth_jd_ut, target_jd_ut)
     except KeyError:
-        raise HTTPException(status_code=400, detail="natal_chart is missing julian_day_ut -- pass the full computed chart, not just positions")
+        raise HTTPException(status_code=400, detail="natal_chart is missing julian_day_ut—pass the full computed chart, not just positions")
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     return result
@@ -159,7 +159,7 @@ def get_progressions(req: ProgressionsRequest):
 
 @app.post("/solar-return")
 def get_solar_return(req: SolarReturnRequest):
-    """A Solar Return chart -- cast for the exact moment the transiting
+    """A Solar Return chart—cast for the exact moment the transiting
     Sun returns to the person's natal Sun degree, at wherever they'll
     actually be that year, not their birthplace. Traditionally read as
     its own chart for what that specific year holds, distinct from a
@@ -211,13 +211,13 @@ def get_reading(req: ReadingRequest):
 class TransitsForDateRequest(BaseModel):
     natal_chart: dict
     house_system: str = "placidus"
-    # Optional override -- when omitted, behaves exactly as before
+    # Optional override—when omitted, behaves exactly as before
     # (today's transits). When provided (e.g. the person's actual
     # birthday, computed client-side from their own stored birth
     # month/day), transits are computed for THAT date instead. This is
     # its own request model rather than reusing VibeOfDayRequest
     # specifically so /vibe-of-day's contract stays untouched and
-    # unambiguous -- that endpoint must always mean literally today,
+    # unambiguous—that endpoint must always mean literally today,
     # regardless of what any caller might pass.
     target_year: int | None = None
     target_month: int | None = None
@@ -227,11 +227,11 @@ class TransitsForDateRequest(BaseModel):
 @app.post("/today-transits")
 def get_today_transits(req: TransitsForDateRequest):
     """Raw, unblended transit content for a given date (why/whats_off,
-    no AI layer touching it) -- used by the ask page for guidance-style
+    no AI layer touching it)—used by the ask page for guidance-style
     questions, which combine this with real natal placement content
     client-side before a single blend call, rather than blending twice.
     Defaults to today; pass target_year/month/day to get transits for
-    a specific date instead (e.g. an upcoming birthday) -- the actual
+    a specific date instead (e.g. an upcoming birthday)—the actual
     fix for readings that referenced "today" when the real question was
     about a different, known date."""
     from datetime import date
@@ -241,7 +241,7 @@ def get_today_transits(req: TransitsForDateRequest):
         target = date.today()
     try:
         # Houses genuinely can't be calculated without a known birth
-        # time -- houses_and_angles (or this specific house system
+        # time—houses_and_angles (or this specific house system
         # within it) can legitimately be None for such a chart. The old
         # unconditional subscript here crashed with a bare NoneType
         # error the moment that happened.
@@ -256,7 +256,7 @@ def get_today_transits(req: TransitsForDateRequest):
         day_result = {"date": target.isoformat(), "score": score, "hits": hits}
         reading = ce.generate_reading(day_result, req.natal_chart["positions"], natal_houses)
 
-        # Additive only -- reading's own why/whats_off text is untouched,
+        # Additive only—reading's own why/whats_off text is untouched,
         # this just also exposes the same top hits as raw structured
         # data (transiting/natal/aspect) rather than already-phrased
         # text, for callers that need to do their own lookup against a
@@ -266,7 +266,7 @@ def get_today_transits(req: TransitsForDateRequest):
         tense_hits = [h for h in hits if h["aspect"] in ce.TENSE]
         reading["top_favorable_hit"] = max(favorable_hits, key=lambda h: h["weight"]) if favorable_hits else None
         reading["top_tense_hit"] = max(tense_hits, key=lambda h: h["weight"]) if tense_hits else None
-        # All hits, not just the single top one -- a caller matching
+        # All hits, not just the single top one—a caller matching
         # hits against a smaller, curated set of content (crystals,
         # for instance, which don't cover every calculated point like
         # Black Moon Lilith or the South Node) needs the option to pick
@@ -275,7 +275,7 @@ def get_today_transits(req: TransitsForDateRequest):
         # its own content actually corresponds to it.
         reading["favorable_hits"] = sorted(favorable_hits, key=lambda h: h["weight"], reverse=True)
         reading["tense_hits"] = sorted(tense_hits, key=lambda h: h["weight"], reverse=True)
-        # A guaranteed fallback fact -- the Moon's current sign needs no
+        # A guaranteed fallback fact—the Moon's current sign needs no
         # aspect to exist at all, unlike every hit above. On a
         # genuinely quiet day (or one where the only real aspects
         # happen to be conjunctions, which count as neither favorable
@@ -325,7 +325,7 @@ NATAL_PLANET_THEME = {
 _NATAL_PLANET_THEME_DEFAULT = "a specific, real part of who you are"
 
 # Mirrors the same convention already used for business charts in Ask
-# ("the business's natal X" rather than "your natal X") -- the same
+# ("the business's natal X" rather than "your natal X")—the same
 # planets, reframed around what each one represents for a business
 # specifically rather than a person.
 BUSINESS_PLANET_THEME = {
@@ -349,7 +349,7 @@ _BUSINESS_PLANET_THEME_DEFAULT = "a specific, real part of how the business oper
 def get_year_ahead(req: YearAheadRequest):
     """The year's real, distinct outer-planet themes, written into one
     genuine overview via the same shared blend function every other
-    reading in the app uses -- not hand-written content for every
+    reading in the app uses—not hand-written content for every
     possible planet combination, which isn't a tractable amount of
     content to write well. Works identically for a business chart --
     the underlying scan doesn't care whose chart it's given, only the
@@ -366,11 +366,11 @@ def get_year_ahead(req: YearAheadRequest):
         # Picking the 6 tightest hits overall, with no regard for WHEN
         # they occur, can (and did) cluster every single one into the
         # first third of the year while leaving the rest completely
-        # unmentioned -- not a genuine year-ahead overview. Six
+        # unmentioned—not a genuine year-ahead overview. Six
         # two-month buckets (not four quarters) each get a guaranteed
         # pick when one exists, so late-year coverage can't come down
         # to whichever single quarter-wide pick happened to land in
-        # its earliest month -- the actual reason November and
+        # its earliest month—the actual reason November and
         # December were going unmentioned even after the quarter fix.
         # Two extra wildcard slots beyond the six guaranteed ones let
         # an especially significant cluster still stand out fully.
@@ -397,7 +397,7 @@ def get_year_ahead(req: YearAheadRequest):
             transiting_theme = ce.OUTER_PLANET_CROSSING_MEANING.get(h["transiting"], "a real shift")
             month_name = h["approx_date"][:7]
             # Real interpretive content now, not just the mechanical
-            # fact -- what the transiting planet generally brings,
+            # fact—what the transiting planet generally brings,
             # meeting what the natal planet actually represents for
             # this subject, framed by whether the aspect itself is
             # supportive or tense. This is the substance an AI blend
@@ -410,10 +410,10 @@ def get_year_ahead(req: YearAheadRequest):
                 f"-- {framing}. {h['transiting']} brings {transiting_theme}, meeting {natal_theme}."
             ))
         if not ingredients:
-            return {"message": "Nothing especially strong from the outer planets stands out this year -- a comparatively quiet one, astrologically."}
+            return {"message": "Nothing especially strong from the outer planets stands out this year—a comparatively quiet one, astrologically."}
         message = ce.blend_answer(
             ingredients,
-            f"Explain what {req.year} actually means for {subject_noun} astrologically -- not a list of "
+            f"Explain what {req.year} actually means for {subject_noun} astrologically—not a list of "
             f"transits and dates, but what each real theme below is likely to bring up or require, "
             f"walked through in the order they happen across the year.",
             detailed=True,
@@ -427,7 +427,7 @@ def get_year_ahead(req: YearAheadRequest):
 @app.get("/moon-phases")
 def get_moon_phases():
     """Current moon phase plus the next 8 upcoming phase transitions with
-    their exact dates -- the real astronomical data behind the Moon
+    their exact dates—the real astronomical data behind the Moon
     Phases page. No personal chart data needed at all, so this takes no
     request body."""
     from datetime import date
@@ -444,7 +444,7 @@ def get_moon_phases():
 @app.post("/vibe-of-day")
 def get_vibe_of_day(req: VibeOfDayRequest):
     """
-    The real integrated 'horoscope on steroids' -- today's transits,
+    The real integrated 'horoscope on steroids'—today's transits,
     retrogrades, eclipse (if any), and moon phase, genuinely blended
     into one cohesive, personalized message via the AI-layer-on-top-of-
     real-content pattern.
@@ -453,7 +453,7 @@ def get_vibe_of_day(req: VibeOfDayRequest):
     today = date.today()
     try:
         # Houses genuinely can't be calculated without a known birth
-        # time -- houses_and_angles (or this specific house system
+        # time—houses_and_angles (or this specific house system
         # within it) can legitimately be None for such a chart. The old
         # unconditional subscript here crashed with a bare NoneType
         # error the moment that happened.
@@ -516,7 +516,7 @@ class AstrocartographyLinesRequest(BaseModel):
 @app.post("/astrocartography-lines")
 def get_astrocartography_lines(req: AstrocartographyLinesRequest):
     """
-    Returns the RAW line geometry (not a proximity check) -- every planet's
+    Returns the RAW line geometry (not a proximity check)—every planet's
     MC/IC longitude and full AC/DC curves. This is what a "recommend me
     places" feature needs: the actual line to sample points along, not a
     yes/no check against one place someone already named.
@@ -555,7 +555,7 @@ class PlanetaryHoursRequest(BaseModel):
 @app.post("/planetary-hours")
 def get_planetary_hours(req: PlanetaryHoursRequest):
     """Real sunrise/sunset-based planetary hours for a specific date and
-    location -- location matters here, this isn't birth-chart data."""
+    location—location matters here, this isn't birth-chart data."""
     try:
         result = ce.compute_planetary_hours(req.year, req.month, req.day, req.lat, req.lon)
     except Exception as e:
@@ -566,7 +566,7 @@ def get_planetary_hours(req: PlanetaryHoursRequest):
 @app.post("/calendar-range")
 def get_calendar_range(req: CalendarRangeRequest):
     """Moon phases, void-of-course windows, and notable transits against
-    this specific chart, for a date range -- the data layer for the
+    this specific chart, for a date range—the data layer for the
     calendar/planner feature."""
     try:
         result = ce.calendar_range(
@@ -580,7 +580,7 @@ def get_calendar_range(req: CalendarRangeRequest):
 
 @app.post("/synastry")
 def get_synastry(req: SynastryRequest):
-    """Every aspect between two charts' planets -- relationship or founder/business comparison."""
+    """Every aspect between two charts' planets—relationship or founder/business comparison."""
     try:
         hits = ce.compute_synastry(req.chart_a_positions, req.chart_b_positions, label_a=req.label_a, label_b=req.label_b)
     except Exception as e:
@@ -604,7 +604,7 @@ class ClassifyQuestionMultiRequest(BaseModel):
 @app.post("/classify-question-multi")
 def classify_question_multi_endpoint(req: ClassifyQuestionMultiRequest):
     """Separate endpoint from /classify-question for the same reason
-    the underlying function is separate -- Chart & Cards needs several
+    the underlying function is separate—Chart & Cards needs several
     relevant houses per question, not one, and this keeps that need
     from ever touching the single-lens path other features depend on."""
     try:
@@ -621,7 +621,7 @@ class BlendAnswerRequest(BaseModel):
     ingredients: list[list[str]]  # [[label, text], [label, text], ...]
     question: str
     detailed: bool = False
-    # Opt-in only -- most callers of this shared endpoint (synastry,
+    # Opt-in only—most callers of this shared endpoint (synastry,
     # location questions) have no need for live web search, and it's a
     # real cost/latency/reliability tradeoff not worth defaulting on
     # everywhere. The lookbook is the first real use case: a place
@@ -631,7 +631,7 @@ class BlendAnswerRequest(BaseModel):
     # less-famous places.
     allow_web_search: bool = False
     # Genuine, explanatory multi-paragraph prose (Year Ahead's voice)
-    # rather than the terse concrete-facts default -- needed for
+    # rather than the terse concrete-facts default—needed for
     # anything reading a whole chart's worth of placements as one
     # cohesive interpretation, like a Solar Return or Composite chart,
     # rather than answering one specific question.
@@ -640,7 +640,7 @@ class BlendAnswerRequest(BaseModel):
 
 @app.post("/blend-answer")
 def get_blended_answer(req: BlendAnswerRequest):
-    """Generic blending endpoint -- used by any surface whose real
+    """Generic blending endpoint—used by any surface whose real
     content library lives on the frontend (synastry, location, the
     lookbook) rather than in this engine. Takes real ingredients,
     returns one direct, cohesive answer to the actual question asked."""
@@ -655,7 +655,7 @@ def get_blended_answer(req: BlendAnswerRequest):
 @app.post("/classify-question")
 def classify_question_endpoint(req: ClassifyQuestionRequest):
     """General-purpose free-text classifier, reused for synastry and
-    location questions -- same invisible-AI routing already used for
+    location questions—same invisible-AI routing already used for
     the main reading flow, just with a swappable lens set."""
     try:
         result = ce.classify_open_question(
@@ -677,7 +677,7 @@ class RecommendLocationsRequest(BaseModel):
 
 @app.post("/recommend-locations")
 def get_recommended_locations(req: RecommendLocationsRequest):
-    """The real 'where should I go for X' engine -- ranks real candidate
+    """The real 'where should I go for X' engine—ranks real candidate
     cities by proximity to the theme's relevant planetary lines."""
     try:
         results = ce.recommend_locations(

@@ -2,10 +2,10 @@
 #
 # Deploys to Railway alongside chart_service.py, chart_engine.py, and
 # billing.py. Requires these environment variables:
-#   VAPID_PRIVATE_KEY —the PEM private key generated for this app
-#   VAPID_PUBLIC_KEY  —the matching base64url public key (also needed
+#   VAPID_PRIVATE_KEY—the PEM private key generated for this app
+#   VAPID_PUBLIC_KEY —the matching base64url public key (also needed
 #                         on the frontend as NEXT_PUBLIC_VAPID_PUBLIC_KEY
-#                        —it's the SAME value in both places)
+#                       —it's the SAME value in both places)
 #   VAPID_CONTACT_EMAIL—a real contact email, required by the push
 #                         spec so a browser vendor can reach you if a
 #                         subscriber's push traffic looks abusive

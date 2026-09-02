@@ -1,26 +1,26 @@
-# push.py -- Web push notifications for Estrella.
+# push.py—Web push notifications for Estrella.
 #
 # Deploys to Railway alongside chart_service.py, chart_engine.py, and
 # billing.py. Requires these environment variables:
-#   VAPID_PRIVATE_KEY  -- the PEM private key generated for this app
-#   VAPID_PUBLIC_KEY   -- the matching base64url public key (also needed
+#   VAPID_PRIVATE_KEY —the PEM private key generated for this app
+#   VAPID_PUBLIC_KEY  —the matching base64url public key (also needed
 #                         on the frontend as NEXT_PUBLIC_VAPID_PUBLIC_KEY
-#                         -- it's the SAME value in both places)
-#   VAPID_CONTACT_EMAIL -- a real contact email, required by the push
+#                        —it's the SAME value in both places)
+#   VAPID_CONTACT_EMAIL—a real contact email, required by the push
 #                         spec so a browser vendor can reach you if a
 #                         subscriber's push traffic looks abusive
-#   SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY -- same as billing.py
+#   SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY—same as billing.py
 #
 # What this file does NOT do on its own: decide WHEN to send anything.
 # /push/send-daily below is a real, working endpoint that checks
 # whether the moon phase actually changed since yesterday and sends a
-# notification to everyone subscribed if so -- but something has to
+# notification to everyone subscribed if so—but something has to
 # actually CALL that endpoint once a day for this to happen
 # automatically. Railway doesn't run scheduled jobs on its own; this
 # needs either Railway's own cron feature (if your plan includes it)
 # or a free external scheduler (cron-job.org, GitHub Actions on a
 # schedule, etc.) configured to hit this endpoint daily. That setup
-# step is yours to do -- it can't be configured from here.
+# step is yours to do—it can't be configured from here.
 
 import os
 from fastapi import APIRouter, HTTPException, Header
@@ -85,7 +85,7 @@ def _send_to_device(sub: dict, title: str, body: str, url: str = "/home") -> boo
     """Sends one notification to one specific subscribed device. Returns
     whether it actually succeeded. A dead/expired subscription (the
     browser un-registered it, the device was reset, etc.) fails with a
-    404/410 from the push service -- cleaned up here rather than
+    404/410 from the push service—cleaned up here rather than
     retried forever."""
     try:
         webpush(
@@ -107,7 +107,7 @@ def _send_to_device(sub: dict, title: str, body: str, url: str = "/home") -> boo
         return False
 
 
-# Same tight-orb threshold across both personal checks below -- loose
+# Same tight-orb threshold across both personal checks below—loose
 # enough to actually catch something real, tight enough that this
 # doesn't fire most days for most people. A transit that's been in a
 # wide, non-notification-worthy orb for weeks shouldn't ping someone's
@@ -117,7 +117,7 @@ _NOTIFY_ORB_DEGREES = 1.0
 
 def _find_personal_hits(natal_positions: dict, transiting_positions: dict) -> dict | None:
     """Checks one person's own chart against today's transiting outer
-    planets (Jupiter through Pluto -- the only ones slow and significant
+    planets (Jupiter through Pluto—the only ones slow and significant
     enough to be worth a same-day alert; fast planets aspect constantly
     and would make this spam). Returns the single tightest real hit, if
     any, distinguishing a genuine "return" (a planet transiting back
@@ -146,7 +146,7 @@ def _find_personal_hits(natal_positions: dict, transiting_positions: dict) -> di
 
 @router.post("/push/send-daily")
 def send_daily(x_cron_secret: str | None = Header(None, alias="X-Cron-Secret")):
-    """The real, comprehensive daily check -- not just moon phases.
+    """The real, comprehensive daily check—not just moon phases.
     Covers, every day:
       - Moon phase changes (global, same for everyone)
       - A retrograde starting today (global)
@@ -155,12 +155,12 @@ def send_daily(x_cron_secret: str | None = Header(None, alias="X-Cron-Secret")):
         or a tight, currently-peaking outer-planet transit (personal,
         different for every person, and the part that was missing
         entirely before this).
-    Needs something external calling this once a day -- see the module
+    Needs something external calling this once a day—see the module
     docstring above.
 
     Protected by a shared secret (set CRON_SECRET on Railway and
     configure your scheduler to send it as this header) so this can't
-    be triggered by anyone who happens to find the URL -- and guarded
+    be triggered by anyone who happens to find the URL—and guarded
     against firing twice on the same day even if it IS called more
     than once, via a unique-per-date row in push_send_log, so an
     accidental duplicate call never means a duplicate notification to
@@ -187,7 +187,7 @@ def send_daily(x_cron_secret: str | None = Header(None, alias="X-Cron-Secret")):
     except Exception:
         return {"sent": 0, "already_ran_today": True}
 
-    # --- Global events, computed once, shared by everyone -- kept as
+    # --- Global events, computed once, shared by everyone—kept as
     # separate, labeled lines rather than one joined string, so each
     # category can be independently included or skipped per recipient
     # based on their own notification_prefs below.
@@ -217,7 +217,7 @@ def send_daily(x_cron_secret: str | None = Header(None, alias="X-Cron-Secret")):
 
     # --- Housekeeping: revert any expired comped period back to
     # genuinely 'free' status. A comped period (no real Stripe
-    # subscription behind it -- a referral reward or birthday gift
+    # subscription behind it—a referral reward or birthday gift
     # given to someone on the free tier) has nothing that automatically
     # flips its status back once the period ends; PaywallGate already
     # correctly blocks access by comparing today's date to the stored
@@ -226,7 +226,7 @@ def send_daily(x_cron_secret: str | None = Header(None, alias="X-Cron-Secret")):
     # would mislead the admin panel and dead-end a user who looks at
     # their own billing page. Scoped narrowly: only rows with NO real
     # stripe_subscription_id, so this never touches an actual paying
-    # subscriber -- those transitions are Stripe's own job, already
+    # subscriber—those transitions are Stripe's own job, already
     # handled correctly by the webhook.
     expired = _supabase_admin.table("users").select("id").is_("stripe_subscription_id", "null") \
         .in_("subscription_status", ["active", "trial"]).lt("subscription_current_period_end", today.isoformat()).execute()
@@ -250,13 +250,13 @@ def send_daily(x_cron_secret: str | None = Header(None, alias="X-Cron-Secret")):
             "subscription_status, stripe_subscription_id, subscription_current_period_end, last_birthday_gift_year"
         ).eq("id", user_id).single().execute()
         if not user_row.data or user_row.data.get("last_birthday_gift_year") == today.year:
-            continue  # already gifted this year, or no matching user row -- skip either way
+            continue  # already gifted this year, or no matching user row—skip either way
         try:
             billing._grant_free_month(user_id, user_row.data)
             _supabase_admin.table("users").update({"last_birthday_gift_year": today.year}).eq("id", user_id).execute()
             # _grant_free_month silently no-ops for a lifetime member --
             # correct, since they don't need or benefit from a free
-            # month -- but the message here was being sent unconditionally,
+            # month—but the message here was being sent unconditionally,
             # meaning a lifetime member would get a birthday notification
             # falsely claiming a free month had just been added when
             # nothing was actually granted. Checked explicitly here
@@ -277,7 +277,7 @@ def send_daily(x_cron_secret: str | None = Header(None, alias="X-Cron-Secret")):
         subs_by_user.setdefault(sub["user_id"], []).append(sub)
 
     # Preferences for every subscriber in one query rather than one
-    # lookup per person -- defaults to all-true (matching the current,
+    # lookup per person—defaults to all-true (matching the current,
     # pre-preferences behavior) for anyone whose row somehow doesn't
     # have this set yet, rather than silently sending them nothing.
     DEFAULT_PREFS = {"moon_phase": True, "retrograde": True, "eclipse": True, "personal_transits": True, "birthday": True}
@@ -308,13 +308,13 @@ def send_daily(x_cron_secret: str | None = Header(None, alias="X-Cron-Secret")):
                 print(f"[push] couldn't check personal transits for user {user_id}: {e}")
 
         # The gift itself was already granted unconditionally above,
-        # regardless of preferences -- this only controls whether this
+        # regardless of preferences—this only controls whether this
         # person also gets pinged about it.
         birthday_line = birthday_messages.get(user_id, "") if prefs.get("birthday", True) else ""
 
         message = " ".join(filter(None, [*included_global, personal_line, birthday_line])).strip()
         if not message:
-            continue  # genuinely nothing worth a notification today for this person -- stay silent, don't send noise
+            continue  # genuinely nothing worth a notification today for this person—stay silent, don't send noise
 
         for sub in user_subs:
             if _send_to_device(sub, "Estrella", message, "/billing" if birthday_line else ("/moon-phases" if not personal_line else "/ask")):

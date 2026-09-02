@@ -4,7 +4,7 @@ Takes birth (or founding) date/time/location, returns planetary positions,
 house cusps (Placidus + Whole Sign), and angles.
 
 Uses Moshier semi-analytic mode (no external ephemeris data files needed,
-~1 arcsecond precision — plenty for astrology). Swap to swe.set_ephe_path()
+~1 arcsecond precision—plenty for astrology). Swap to swe.set_ephe_path()
 + downloaded .se1 files later if sub-arcsecond precision is ever needed.
 """
 
@@ -64,17 +64,17 @@ def deg_to_sign(longitude):
 def resolve_utc_offset(year, month, day, hour, minute, lat, lon):
     """
     Given local birth date/time + coordinates, returns the correct
-    HISTORICAL UTC offset in hours for that exact moment — accounting for
+    HISTORICAL UTC offset in hours for that exact moment—accounting for
     DST rules as they actually stood on that date, not today's rules.
     Uses the IANA tz database (via zoneinfo), which tracks historical
-    DST changes per region — this is the piece that makes "just tell me
+    DST changes per region—this is the piece that makes "just tell me
     the city" enough, without the user needing to know their own offset.
     """
     tz_name = _tf.timezone_at(lat=lat, lng=lon)
     if tz_name is None:
         raise ValueError(
             f"Could not resolve a timezone for coordinates ({lat}, {lon}). "
-            "Likely open ocean or bad geocoding — validate location input upstream."
+            "Likely open ocean or bad geocoding—validate location input upstream."
         )
     local_dt = datetime(year, month, day, hour, minute, tzinfo=ZoneInfo(tz_name))
     offset = local_dt.utcoffset()
@@ -381,7 +381,7 @@ def scan_year_ahead(natal_positions, year, samples=52):
 
     Returns the single closest (tightest-orb) hit found across the year
     for each unique (transiting planet, natal point, aspect) combination
-   —the real, distinct themes for the year, not 52 weeks of the same
+  —the real, distinct themes for the year, not 52 weeks of the same
     aspect re-reported as if each week were a new event.
     """
     best_hits = {}  # key: (transiting, natal, aspect) -> hit dict with tightest orb seen
@@ -507,56 +507,56 @@ def route_question_to_lens(question_text):
 # to a generic template. Scaling this to feel consistently specific across
 # every combination is real, ongoing writing work, not a one-time build.
 WHY_PHRASES = {
-    ("Sun", "trine"): "The Sun's lined up well with your natal {n_planet} today — steady, low-effort support around {n_planet_house_note}.",
-    ("Sun", "sextile"): "The Sun's giving your natal {n_planet} a light boost — a small, easy opening around {n_planet_house_note}.",
-    ("Moon", "trine"): "The Moon's trine your natal {n_planet} today — nothing forced, just easy going around {n_planet_house_note}.",
-    ("Moon", "sextile"): "The Moon's lightly favoring your natal {n_planet} — a gentle, low-key opening around {n_planet_house_note}.",
-    ("Mercury", "trine"): "Mercury's flowing well with your natal {n_planet} — conversations and decisions around {n_planet_house_note} should come easier than usual.",
-    ("Mercury", "sextile"): "Mercury's lightly favoring your natal {n_planet} — a good window to talk through anything involving {n_planet_house_note}.",
+    ("Sun", "trine"): "The Sun's lined up well with your natal {n_planet} today—steady, low-effort support around {n_planet_house_note}.",
+    ("Sun", "sextile"): "The Sun's giving your natal {n_planet} a light boost—a small, easy opening around {n_planet_house_note}.",
+    ("Moon", "trine"): "The Moon's trine your natal {n_planet} today—nothing forced, just easy going around {n_planet_house_note}.",
+    ("Moon", "sextile"): "The Moon's lightly favoring your natal {n_planet}—a gentle, low-key opening around {n_planet_house_note}.",
+    ("Mercury", "trine"): "Mercury's flowing well with your natal {n_planet}—conversations and decisions around {n_planet_house_note} should come easier than usual.",
+    ("Mercury", "sextile"): "Mercury's lightly favoring your natal {n_planet}—a good window to talk through anything involving {n_planet_house_note}.",
     ("Venus", "trine"): "Venus is forming an easy angle to your natal {n_planet} today, right around {n_planet_house_note}.",
-    ("Venus", "sextile"): "Venus is lightly favoring your natal {n_planet} — a small opening around {n_planet_house_note}.",
-    ("Mars", "trine"): "Mars is giving your natal {n_planet} some real momentum today — good energy for anything involving {n_planet_house_note}.",
-    ("Mars", "sextile"): "Mars is lightly energizing your natal {n_planet} — a decent window to move on {n_planet_house_note}.",
-    ("Jupiter", "trine"): "Jupiter's trine your natal {n_planet} — this is the kind of day that tends to work out better than expected around {n_planet_house_note}.",
-    ("Jupiter", "sextile"): "Jupiter's lightly favoring your natal {n_planet} — a decent-sized opening around {n_planet_house_note}.",
-    ("Saturn", "trine"): "Saturn's genuinely supporting your natal {n_planet} right now — less exciting than favorable, but solid, around {n_planet_house_note}.",
-    ("Saturn", "sextile"): "Saturn's lightly backing your natal {n_planet} — a steady, unglamorous kind of support around {n_planet_house_note}.",
-    ("Uranus", "trine"): "Uranus is trine your natal {n_planet} — a good day for something a little unexpected to work out around {n_planet_house_note}.",
-    ("Uranus", "sextile"): "Uranus is lightly sparking your natal {n_planet} — a small opening to try something different around {n_planet_house_note}.",
-    ("Neptune", "trine"): "Neptune's trine your natal {n_planet} — good intuition day, especially around {n_planet_house_note}. Trust the hunch.",
-    ("Neptune", "sextile"): "Neptune's lightly favoring your natal {n_planet} — a soft, dreamy opening around {n_planet_house_note}.",
-    ("Pluto", "trine"): "Pluto's trine your natal {n_planet} — real, lasting change is easier to make around {n_planet_house_note} right now.",
-    ("Pluto", "sextile"): "Pluto's lightly supporting your natal {n_planet} — a small chance to shift something around {n_planet_house_note} for good.",
-    ("North Node", "trine"): "The North Node's trine your natal {n_planet} — this pulls you toward where you're really headed, around {n_planet_house_note}.",
-    ("North Node", "sextile"): "The North Node's lightly favoring your natal {n_planet} — a nudge in the right direction around {n_planet_house_note}.",
-    ("Chiron", "trine"): "Chiron's trine your natal {n_planet} — an easier day to be gentle with yourself around {n_planet_house_note}.",
-    ("Chiron", "sextile"): "Chiron's lightly favoring your natal {n_planet} — a small chance for something old to feel less tender around {n_planet_house_note}.",
+    ("Venus", "sextile"): "Venus is lightly favoring your natal {n_planet}—a small opening around {n_planet_house_note}.",
+    ("Mars", "trine"): "Mars is giving your natal {n_planet} some real momentum today—good energy for anything involving {n_planet_house_note}.",
+    ("Mars", "sextile"): "Mars is lightly energizing your natal {n_planet}—a decent window to move on {n_planet_house_note}.",
+    ("Jupiter", "trine"): "Jupiter's trine your natal {n_planet}—this is the kind of day that tends to work out better than expected around {n_planet_house_note}.",
+    ("Jupiter", "sextile"): "Jupiter's lightly favoring your natal {n_planet}—a decent-sized opening around {n_planet_house_note}.",
+    ("Saturn", "trine"): "Saturn's genuinely supporting your natal {n_planet} right now—less exciting than favorable, but solid, around {n_planet_house_note}.",
+    ("Saturn", "sextile"): "Saturn's lightly backing your natal {n_planet}—a steady, unglamorous kind of support around {n_planet_house_note}.",
+    ("Uranus", "trine"): "Uranus is trine your natal {n_planet}—a good day for something a little unexpected to work out around {n_planet_house_note}.",
+    ("Uranus", "sextile"): "Uranus is lightly sparking your natal {n_planet}—a small opening to try something different around {n_planet_house_note}.",
+    ("Neptune", "trine"): "Neptune's trine your natal {n_planet}—good intuition day, especially around {n_planet_house_note}. Trust the hunch.",
+    ("Neptune", "sextile"): "Neptune's lightly favoring your natal {n_planet}—a soft, dreamy opening around {n_planet_house_note}.",
+    ("Pluto", "trine"): "Pluto's trine your natal {n_planet}—real, lasting change is easier to make around {n_planet_house_note} right now.",
+    ("Pluto", "sextile"): "Pluto's lightly supporting your natal {n_planet}—a small chance to shift something around {n_planet_house_note} for good.",
+    ("North Node", "trine"): "The North Node's trine your natal {n_planet}—this pulls you toward where you're really headed, around {n_planet_house_note}.",
+    ("North Node", "sextile"): "The North Node's lightly favoring your natal {n_planet}—a nudge in the right direction around {n_planet_house_note}.",
+    ("Chiron", "trine"): "Chiron's trine your natal {n_planet}—an easier day to be gentle with yourself around {n_planet_house_note}.",
+    ("Chiron", "sextile"): "Chiron's lightly favoring your natal {n_planet}—a small chance for something old to feel less tender around {n_planet_house_note}.",
 }
 WHAT_S_OFF_PHRASES = {
-    ("Sun", "square"): "The Sun's squaring your natal {n_planet} — a little friction around {n_planet_house_note}, more annoying than serious.",
-    ("Sun", "opposition"): "The Sun's opposing your natal {n_planet} — expect some pull between what you want and what's really in front of you around {n_planet_house_note}.",
-    ("Moon", "square"): "The Moon's squaring your natal {n_planet} — moodier than usual around {n_planet_house_note}, probably won't last past today.",
-    ("Moon", "opposition"): "The Moon's opposing your natal {n_planet} — you might feel pulled in two directions around {n_planet_house_note} today.",
-    ("Mercury", "square"): "Mercury's squaring your natal {n_planet} — miscommunication risk around {n_planet_house_note}. Reread anything before you send it.",
-    ("Mercury", "opposition"): "Mercury's opposing your natal {n_planet} — you and someone else may just be seeing {n_planet_house_note} differently today. Worth double-checking before assuming.",
-    ("Venus", "square"): "Venus is squaring your natal {n_planet} — a little tension around {n_planet_house_note}, nothing that won't pass.",
-    ("Venus", "opposition"): "Venus is opposing your natal {n_planet} — a pull between what feels good and what's genuinely good for {n_planet_house_note}.",
-    ("Mars", "square"): "Mars squares your natal {n_planet} — short-fuse energy around {n_planet_house_note}. Don't force it if it's not flowing.",
-    ("Mars", "opposition"): "Mars opposes your natal {n_planet} — real risk of a power struggle around {n_planet_house_note}. Pick your moment.",
-    ("Jupiter", "square"): "Jupiter's squaring your natal {n_planet} — easy to overdo it around {n_planet_house_note} today. Good day to double-check the math before committing.",
-    ("Jupiter", "opposition"): "Jupiter's opposing your natal {n_planet} — a temptation to overpromise around {n_planet_house_note}. Worth sitting with it a beat longer.",
-    ("Saturn", "square"): "Saturn squares your natal {n_planet} — expect some friction or delay around {n_planet_house_note}, not a hard no.",
-    ("Saturn", "opposition"): "Saturn opposes your natal {n_planet} — more of a gut check than a real obstacle around {n_planet_house_note}.",
-    ("Uranus", "square"): "Uranus squares your natal {n_planet} — something around {n_planet_house_note} could shift without warning today. Roll with it if it does.",
-    ("Uranus", "opposition"): "Uranus opposes your natal {n_planet} — a sudden pull toward doing something different around {n_planet_house_note}. Sleep on the big version of it.",
-    ("Neptune", "square"): "Neptune squares your natal {n_planet} — things around {n_planet_house_note} might feel foggier than they really are. Get the specifics in writing.",
-    ("Neptune", "opposition"): "Neptune opposes your natal {n_planet} — easy to see what you want to see around {n_planet_house_note} today instead of what's really there.",
-    ("Pluto", "square"): "Pluto squares your natal {n_planet} — intense, not necessarily bad, around {n_planet_house_note}. Give it a day before reacting.",
-    ("Pluto", "opposition"): "Pluto opposes your natal {n_planet} — a power dynamic around {n_planet_house_note} might come to a head. Stay aware of it, don't force a resolution today.",
-    ("North Node", "square"): "The North Node squares your natal {n_planet} — a little friction between where you're comfortable and where you're headed, around {n_planet_house_note}.",
-    ("North Node", "opposition"): "The North Node opposes your natal {n_planet} — old habits around {n_planet_house_note} might feel extra tempting today. Worth noticing, not necessarily following.",
-    ("Chiron", "square"): "Chiron squares your natal {n_planet} — an old sore spot might get poked around {n_planet_house_note}. Doesn't mean it's serious.",
-    ("Chiron", "opposition"): "Chiron opposes your natal {n_planet} — something tender around {n_planet_house_note} might come up today. Worth being gentle with yourself about it.",
+    ("Sun", "square"): "The Sun's squaring your natal {n_planet}—a little friction around {n_planet_house_note}, more annoying than serious.",
+    ("Sun", "opposition"): "The Sun's opposing your natal {n_planet}—expect some pull between what you want and what's really in front of you around {n_planet_house_note}.",
+    ("Moon", "square"): "The Moon's squaring your natal {n_planet}—moodier than usual around {n_planet_house_note}, probably won't last past today.",
+    ("Moon", "opposition"): "The Moon's opposing your natal {n_planet}—you might feel pulled in two directions around {n_planet_house_note} today.",
+    ("Mercury", "square"): "Mercury's squaring your natal {n_planet}—miscommunication risk around {n_planet_house_note}. Reread anything before you send it.",
+    ("Mercury", "opposition"): "Mercury's opposing your natal {n_planet}—you and someone else may just be seeing {n_planet_house_note} differently today. Worth double-checking before assuming.",
+    ("Venus", "square"): "Venus is squaring your natal {n_planet}—a little tension around {n_planet_house_note}, nothing that won't pass.",
+    ("Venus", "opposition"): "Venus is opposing your natal {n_planet}—a pull between what feels good and what's genuinely good for {n_planet_house_note}.",
+    ("Mars", "square"): "Mars squares your natal {n_planet}—short-fuse energy around {n_planet_house_note}. Don't force it if it's not flowing.",
+    ("Mars", "opposition"): "Mars opposes your natal {n_planet}—real risk of a power struggle around {n_planet_house_note}. Pick your moment.",
+    ("Jupiter", "square"): "Jupiter's squaring your natal {n_planet}—easy to overdo it around {n_planet_house_note} today. Good day to double-check the math before committing.",
+    ("Jupiter", "opposition"): "Jupiter's opposing your natal {n_planet}—a temptation to overpromise around {n_planet_house_note}. Worth sitting with it a beat longer.",
+    ("Saturn", "square"): "Saturn squares your natal {n_planet}—expect some friction or delay around {n_planet_house_note}, not a hard no.",
+    ("Saturn", "opposition"): "Saturn opposes your natal {n_planet}—more of a gut check than a real obstacle around {n_planet_house_note}.",
+    ("Uranus", "square"): "Uranus squares your natal {n_planet}—something around {n_planet_house_note} could shift without warning today. Roll with it if it does.",
+    ("Uranus", "opposition"): "Uranus opposes your natal {n_planet}—a sudden pull toward doing something different around {n_planet_house_note}. Sleep on the big version of it.",
+    ("Neptune", "square"): "Neptune squares your natal {n_planet}—things around {n_planet_house_note} might feel foggier than they really are. Get the specifics in writing.",
+    ("Neptune", "opposition"): "Neptune opposes your natal {n_planet}—easy to see what you want to see around {n_planet_house_note} today instead of what's really there.",
+    ("Pluto", "square"): "Pluto squares your natal {n_planet}—intense, not necessarily bad, around {n_planet_house_note}. Give it a day before reacting.",
+    ("Pluto", "opposition"): "Pluto opposes your natal {n_planet}—a power dynamic around {n_planet_house_note} might come to a head. Stay aware of it, don't force a resolution today.",
+    ("North Node", "square"): "The North Node squares your natal {n_planet}—a little friction between where you're comfortable and where you're headed, around {n_planet_house_note}.",
+    ("North Node", "opposition"): "The North Node opposes your natal {n_planet}—old habits around {n_planet_house_note} might feel extra tempting today. Worth noticing, not necessarily following.",
+    ("Chiron", "square"): "Chiron squares your natal {n_planet}—an old sore spot might get poked around {n_planet_house_note}. Doesn't mean it's serious.",
+    ("Chiron", "opposition"): "Chiron opposes your natal {n_planet}—something tender around {n_planet_house_note} might come up today. Worth being gentle with yourself about it.",
 }
 HOUSE_NOTES = {
     1: "your sense of self", 2: "your money and what you value",
@@ -885,7 +885,7 @@ def _blend_vibe_ingredients(ingredients, api_key=None):
     # copy of the same dash normalization—without this, Vibe of Day
     # specifically would keep showing the model's own " -- " habit even
     # after every other caller was fixed.
-    return result.replace(" -- ", "\u2014")
+    return _normalize_dashes(result)
 
 
 ANGLE_MEANING = {
@@ -1192,7 +1192,7 @@ def generate_integrated_question_reading(top_day, natal_positions, natal_houses,
         )
         # Same bypass of blend_answer as _blend_vibe_ingredients above,
         # so it needs the same normalization applied directly here.
-        result["message"] = result["message"].replace(" -- ", "\u2014")
+        result["message"] = _normalize_dashes(result["message"])
     except Exception:
         result["message"] = " ".join(text for _, text in ingredients)
         result["blend_failed"] = True
@@ -3283,6 +3283,24 @@ def _cut_commentary(raw_text, api_key=None):
         return raw_text
 
 
+def _normalize_dashes(text):
+    """Applied to every live model generation, everywhere in the app --
+    the model's own dash habits are independent of whatever style this
+    file's own prompts use, so sweeping this file's text alone was
+    never enough. Handles both the old double-hyphen style AND an
+    already-real em dash that still has spaces around it (the more
+    common, conventional way a model naturally writes one) -- catching
+    only the second case was the actual gap that let Vibe of Day and
+    Card of the Day keep showing spaced dashes even after the first
+    fix.
+    """
+    text = text.replace(" -- ", "\u2014")
+    text = text.replace(" \u2014 ", "\u2014")
+    text = text.replace(" \u2014", "\u2014")
+    text = text.replace("\u2014 ", "\u2014")
+    return text
+
+
 def blend_answer(ingredients, question_text, api_key=None, detailed=False, allow_web_search=False, interpretive=False):
     """
     Generic blending entry point for surfaces where the real content
@@ -3364,7 +3382,7 @@ def blend_answer(ingredients, question_text, api_key=None, detailed=False, allow
     # Normalized here, once, so every caller through this one function
     # gets a real em dash with no surrounding spaces, regardless of
     # what the model actually generated.
-    result = result.replace(" -- ", "\u2014")
+    result = _normalize_dashes(result)
     return result
 
 
@@ -3541,7 +3559,7 @@ def compute_chart_from_jd_ut(jd_ut, lat, lon, chart_system="western", unknown_ti
 
 def compute_chart(year, month, day, hour, minute, lat, lon, unknown_time=False, chart_system="western"):
     """
-    Main entry point. Caller supplies LOCAL birth date/time + coordinates —
+    Main entry point. Caller supplies LOCAL birth date/time + coordinates—
     the correct historical UTC offset is resolved automatically.
 
     chart_system: "western" (tropical zodiac, Placidus/Whole Sign choice),
@@ -3557,7 +3575,7 @@ def compute_chart(year, month, day, hour, minute, lat, lon, unknown_time=False, 
 
     If unknown_time=True, defaults to noon local and omits houses/angles/
     Part of Fortune/vertex (all meaningless without an exact birth time)
-    — planetary signs are still valid since most planets don't change
+  —planetary signs are still valid since most planets don't change
     sign within a single day.
     """
     if unknown_time:
@@ -3579,7 +3597,7 @@ def compute_progressed_positions(birth_jd_ut, target_jd_ut):
     progressed chart. Verified against a real example before trusting
     it: the progressed Sun moves close to 1 degree per progressed year
     (matching its real ~1 degree/day motion), and the progressed Moon
-   —which moves roughly 13 degrees/day—laps the whole zodiac
+  —which moves roughly 13 degrees/day—laps the whole zodiac
     roughly once every 27-28 progressed years, both consistent with
     how secondary progressions actually behave.
 

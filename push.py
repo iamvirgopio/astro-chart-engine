@@ -115,6 +115,26 @@ def _send_to_device(sub: dict, title: str, body: str, url: str = "/home") -> boo
 _NOTIFY_ORB_DEGREES = 1.0
 
 
+def _check_progression_sign_change(birth_jd_ut: float, jd_today: float, jd_yesterday: float) -> dict | None:
+    """Checks whether the progressed Sun or Moon crossed into a new
+    sign between yesterday and today—a genuinely rare event, unlike a
+    daily transit check. The progressed Moon changes sign roughly
+    every two and a half years; the progressed Sun moves so slowly
+    (about a degree a year) that a sign change usually happens only
+    once or twice in a lifetime. Checks the Sun first, since a
+    progressed Sun sign change is the rarer, more significant of the
+    two if both somehow landed on the same day.
+    """
+    prog_today = ce.compute_progressed_positions(birth_jd_ut, jd_today)
+    prog_yesterday = ce.compute_progressed_positions(birth_jd_ut, jd_yesterday)
+    for planet in ("Sun", "Moon"):
+        sign_today = prog_today["positions"][planet]["sign"]
+        sign_yesterday = prog_yesterday["positions"][planet]["sign"]
+        if sign_today != sign_yesterday:
+            return {"planet": planet, "sign": sign_today}
+    return None
+
+
 def _find_personal_hits(natal_positions: dict, transiting_positions: dict) -> dict | None:
     """Checks one person's own chart against today's transiting outer
     planets (Jupiter through Pluto—the only ones slow and significant
@@ -155,6 +175,11 @@ def send_daily(x_cron_secret: str | None = Header(None, alias="X-Cron-Secret")):
         or a tight, currently-peaking outer-planet transit (personal,
         different for every person, and the part that was missing
         entirely before this).
+      - Each subscribed user's progressed Sun or Moon crossing into a
+        new sign since yesterday—a genuinely rare event (the Moon
+        roughly every two and a half years, the Sun maybe once or
+        twice in a lifetime), not a daily check like the transit one
+        above.
     Needs something external calling this once a day—see the module
     docstring above.
 
@@ -280,7 +305,7 @@ def send_daily(x_cron_secret: str | None = Header(None, alias="X-Cron-Secret")):
     # lookup per person—defaults to all-true (matching the current,
     # pre-preferences behavior) for anyone whose row somehow doesn't
     # have this set yet, rather than silently sending them nothing.
-    DEFAULT_PREFS = {"moon_phase": True, "retrograde": True, "eclipse": True, "personal_transits": True, "birthday": True}
+    DEFAULT_PREFS = {"moon_phase": True, "retrograde": True, "eclipse": True, "personal_transits": True, "birthday": True, "progressions": True}
     prefs_by_user: dict[str, dict] = {}
     if subs_by_user:
         prefs_rows = _supabase_admin.table("users").select("id, notification_prefs").in_("id", list(subs_by_user.keys())).execute()
@@ -294,25 +319,34 @@ def send_daily(x_cron_secret: str | None = Header(None, alias="X-Cron-Secret")):
         included_global = [line for key, line in global_events.items() if prefs.get(key, True)]
 
         personal_line = ""
-        if prefs.get("personal_transits", True):
+        progression_line = ""
+        needs_chart = prefs.get("personal_transits", True) or prefs.get("progressions", True)
+        if needs_chart:
             try:
                 chart_row = _supabase_admin.table("charts").select("computed_data").eq("user_id", user_id).eq("chart_type", "personal").single().execute()
                 if chart_row.data:
-                    hit = _find_personal_hits(chart_row.data["computed_data"]["positions"], positions_today)
-                    if hit:
-                        if hit["is_return"]:
-                            personal_line = f"Your {hit['transiting']} Return is happening right now."
-                        else:
-                            personal_line = f"Transiting {hit['transiting']} is forming a tight {hit['aspect']} to your natal {hit['natal']} today."
+                    if prefs.get("personal_transits", True):
+                        hit = _find_personal_hits(chart_row.data["computed_data"]["positions"], positions_today)
+                        if hit:
+                            if hit["is_return"]:
+                                personal_line = f"Your {hit['transiting']} Return is happening right now."
+                            else:
+                                personal_line = f"Transiting {hit['transiting']} is forming a tight {hit['aspect']} to your natal {hit['natal']} today."
+                    if prefs.get("progressions", True):
+                        birth_jd_ut = chart_row.data["computed_data"].get("julian_day_ut")
+                        if birth_jd_ut:
+                            prog_hit = _check_progression_sign_change(birth_jd_ut, jd_today, jd_yesterday)
+                            if prog_hit:
+                                progression_line = f"Your progressed {prog_hit['planet']} just moved into {prog_hit['sign']}."
             except Exception as e:
-                print(f"[push] couldn't check personal transits for user {user_id}: {e}")
+                print(f"[push] couldn't check personal transits or progressions for user {user_id}: {e}")
 
         # The gift itself was already granted unconditionally above,
         # regardless of preferences—this only controls whether this
         # person also gets pinged about it.
         birthday_line = birthday_messages.get(user_id, "") if prefs.get("birthday", True) else ""
 
-        message = " ".join(filter(None, [*included_global, personal_line, birthday_line])).strip()
+        message = " ".join(filter(None, [*included_global, personal_line, progression_line, birthday_line])).strip()
         if not message:
             continue  # genuinely nothing worth a notification today for this person—stay silent, don't send noise
 

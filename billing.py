@@ -2,20 +2,20 @@
 #
 # Deploys to Railway alongside chart_service.py and chart_engine.py.
 # Requires these environment variables to be set on Railway:
-#   STRIPE_SECRET_KEY      —from the Stripe dashboard (Developers > API keys)
-#   STRIPE_WEBHOOK_SECRET  —from the webhook endpoint you create in Stripe
+#   STRIPE_SECRET_KEY     —from the Stripe dashboard (Developers > API keys)
+#   STRIPE_WEBHOOK_SECRET —from the webhook endpoint you create in Stripe
 #                              (Developers > Webhooks > add endpoint), NOT the
 #                              same as the secret key
-#   STRIPE_PRICE_MONTHLY   —the Price ID (starts with "price_") for the
+#   STRIPE_PRICE_MONTHLY  —the Price ID (starts with "price_") for the
 #                              $19.99/month plan, created in Stripe's dashboard
-#   STRIPE_PRICE_YEARLY    —the Price ID for the $222/year plan
-#   SUPABASE_URL           —same value already used on the frontend
+#   STRIPE_PRICE_YEARLY   —the Price ID for the $222/year plan
+#   SUPABASE_URL          —same value already used on the frontend
 #   SUPABASE_SERVICE_ROLE_KEY—the service role key (not the anon key) --
 #                              needed here because webhook events come
 #                              directly from Stripe with no user login at
 #                              all, so this can't rely on a user's own
 #                              session the way the frontend does
-#   APP_BASE_URL           —the deployed frontend URL (e.g.
+#   APP_BASE_URL          —the deployed frontend URL (e.g.
 #                              https://astro-app-eight-orpin.vercel.app),
 #                              used to build the redirect URLs Stripe sends
 #                              people back to after checkout or the portal

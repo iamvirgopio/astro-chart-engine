@@ -132,6 +132,31 @@ class SolarReturnRequest(BaseModel):
     lon: float = Field(ge=-180, le=180)
 
 
+class ProgressionsRequest(BaseModel):
+    natal_chart: dict  # needs .julian_day_ut, the exact birth moment already resolved to UTC
+    target_year: int | None = None
+    target_month: int | None = None
+    target_day: int | None = None
+
+
+@app.post("/progressions")
+def get_progressions(req: ProgressionsRequest):
+    try:
+        birth_jd_ut = req.natal_chart["julian_day_ut"]
+        if req.target_year and req.target_month and req.target_day:
+            target_jd_ut = ce.julian_day_utc(req.target_year, req.target_month, req.target_day, 12, 0, 0)
+        else:
+            from datetime import date
+            today = date.today()
+            target_jd_ut = ce.julian_day_utc(today.year, today.month, today.day, 12, 0, 0)
+        result = ce.compute_progressed_positions(birth_jd_ut, target_jd_ut)
+    except KeyError:
+        raise HTTPException(status_code=400, detail="natal_chart is missing julian_day_ut -- pass the full computed chart, not just positions")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return result
+
+
 @app.post("/solar-return")
 def get_solar_return(req: SolarReturnRequest):
     """A Solar Return chart -- cast for the exact moment the transiting

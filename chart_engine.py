@@ -878,9 +878,14 @@ def _blend_ingredients_into_answer(ingredients, task_instruction, question_conte
 def _blend_vibe_ingredients(ingredients, api_key=None):
     """Thin wrapper over the shared blending function—kept for the
     existing call site in generate_integrated_vibe_of_day."""
-    return _blend_ingredients_into_answer(
+    result = _blend_ingredients_into_answer(
         ingredients, task_instruction="advising someone how to approach today", api_key=api_key,
     )
+    # This wrapper bypasses blend_answer entirely, so it needs its own
+    # copy of the same dash normalization—without this, Vibe of Day
+    # specifically would keep showing the model's own " -- " habit even
+    # after every other caller was fixed.
+    return result.replace(" -- ", "\u2014")
 
 
 ANGLE_MEANING = {
@@ -1185,6 +1190,9 @@ def generate_integrated_question_reading(top_day, natal_positions, natal_houses,
             question_context=question_text,
             api_key=api_key,
         )
+        # Same bypass of blend_answer as _blend_vibe_ingredients above,
+        # so it needs the same normalization applied directly here.
+        result["message"] = result["message"].replace(" -- ", "\u2014")
     except Exception:
         result["message"] = " ".join(text for _, text in ingredients)
         result["blend_failed"] = True
@@ -3350,6 +3358,13 @@ def blend_answer(ingredients, question_text, api_key=None, detailed=False, allow
         # detailed=True (which interpretive callers also need, for the
         # longer token budget) would silently undo the fix above.
         result = _cut_commentary(result, api_key=api_key)
+    # The model's own dash style is independent of whatever formatting
+    # the prompt itself uses—sweeping every " -- " out of this file's
+    # own text doesn't change what a live generation chooses to write.
+    # Normalized here, once, so every caller through this one function
+    # gets a real em dash with no surrounding spaces, regardless of
+    # what the model actually generated.
+    result = result.replace(" -- ", "\u2014")
     return result
 
 

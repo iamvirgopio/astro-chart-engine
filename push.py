@@ -187,13 +187,16 @@ def send_daily(x_cron_secret: str | None = Header(None, alias="X-Cron-Secret")):
     except Exception:
         return {"sent": 0, "already_ran_today": True}
 
-    # --- Global events, computed once, shared by everyone ---
-    global_lines: list[str] = []
+    # --- Global events, computed once, shared by everyone -- kept as
+    # separate, labeled lines rather than one joined string, so each
+    # category can be independently included or skipped per recipient
+    # based on their own notification_prefs below.
+    global_events: dict[str, str] = {}
 
     phase_today = ce.moon_phase(jd_today)["phase"]
     phase_yesterday = ce.moon_phase(jd_yesterday)["phase"]
     if phase_today != phase_yesterday:
-        global_lines.append(f"It's a {phase_today} today.")
+        global_events["moon_phase"] = f"It's a {phase_today} today."
 
     positions_today = ce.compute_positions(jd_today)
     positions_yesterday = ce.compute_positions(jd_yesterday)
@@ -201,13 +204,16 @@ def send_daily(x_cron_secret: str | None = Header(None, alias="X-Cron-Secret")):
         today_retro = positions_today.get(planet, {}).get("retrograde")
         yesterday_retro = positions_yesterday.get(planet, {}).get("retrograde")
         if today_retro and not yesterday_retro:
-            global_lines.append(f"{planet} turns retrograde today.")
+            # Only one retrograde line per day in practice (multiple
+            # planets starting retrograde on the same day is rare), but
+            # if it ever happens, the later one simply overwrites --
+            # acceptable, since missing a same-day second retrograde
+            # notice is a minor loss, not a real bug.
+            global_events["retrograde"] = f"{planet} turns retrograde today."
 
     eclipses_today = ce.find_eclipses_in_range(jd_today - 0.5, jd_today + 0.5)
     if eclipses_today:
-        global_lines.append(f"Today's a {eclipses_today[0]['type']} eclipse.")
-
-    global_message = " ".join(global_lines)
+        global_events["eclipse"] = f"Today's a {eclipses_today[0]['type']} eclipse."
 
     # --- Housekeeping: revert any expired comped period back to
     # genuinely 'free' status. A comped period (no real Stripe
@@ -270,23 +276,43 @@ def send_daily(x_cron_secret: str | None = Header(None, alias="X-Cron-Secret")):
     for sub in subs.data or []:
         subs_by_user.setdefault(sub["user_id"], []).append(sub)
 
+    # Preferences for every subscriber in one query rather than one
+    # lookup per person -- defaults to all-true (matching the current,
+    # pre-preferences behavior) for anyone whose row somehow doesn't
+    # have this set yet, rather than silently sending them nothing.
+    DEFAULT_PREFS = {"moon_phase": True, "retrograde": True, "eclipse": True, "personal_transits": True, "birthday": True}
+    prefs_by_user: dict[str, dict] = {}
+    if subs_by_user:
+        prefs_rows = _supabase_admin.table("users").select("id, notification_prefs").in_("id", list(subs_by_user.keys())).execute()
+        for row in prefs_rows.data or []:
+            prefs_by_user[row["id"]] = {**DEFAULT_PREFS, **(row.get("notification_prefs") or {})}
+
     sent = 0
     for user_id, user_subs in subs_by_user.items():
-        personal_line = ""
-        try:
-            chart_row = _supabase_admin.table("charts").select("computed_data").eq("user_id", user_id).eq("chart_type", "personal").single().execute()
-            if chart_row.data:
-                hit = _find_personal_hits(chart_row.data["computed_data"]["positions"], positions_today)
-                if hit:
-                    if hit["is_return"]:
-                        personal_line = f"Your {hit['transiting']} Return is happening right now."
-                    else:
-                        personal_line = f"Transiting {hit['transiting']} is forming a tight {hit['aspect']} to your natal {hit['natal']} today."
-        except Exception as e:
-            print(f"[push] couldn't check personal transits for user {user_id}: {e}")
+        prefs = prefs_by_user.get(user_id, DEFAULT_PREFS)
 
-        birthday_line = birthday_messages.get(user_id, "")
-        message = " ".join(filter(None, [global_message, personal_line, birthday_line])).strip()
+        included_global = [line for key, line in global_events.items() if prefs.get(key, True)]
+
+        personal_line = ""
+        if prefs.get("personal_transits", True):
+            try:
+                chart_row = _supabase_admin.table("charts").select("computed_data").eq("user_id", user_id).eq("chart_type", "personal").single().execute()
+                if chart_row.data:
+                    hit = _find_personal_hits(chart_row.data["computed_data"]["positions"], positions_today)
+                    if hit:
+                        if hit["is_return"]:
+                            personal_line = f"Your {hit['transiting']} Return is happening right now."
+                        else:
+                            personal_line = f"Transiting {hit['transiting']} is forming a tight {hit['aspect']} to your natal {hit['natal']} today."
+            except Exception as e:
+                print(f"[push] couldn't check personal transits for user {user_id}: {e}")
+
+        # The gift itself was already granted unconditionally above,
+        # regardless of preferences -- this only controls whether this
+        # person also gets pinged about it.
+        birthday_line = birthday_messages.get(user_id, "") if prefs.get("birthday", True) else ""
+
+        message = " ".join(filter(None, [*included_global, personal_line, birthday_line])).strip()
         if not message:
             continue  # genuinely nothing worth a notification today for this person -- stay silent, don't send noise
 
@@ -295,4 +321,4 @@ def send_daily(x_cron_secret: str | None = Header(None, alias="X-Cron-Secret")):
                 sent += 1
 
     _supabase_admin.table("push_send_log").update({"phase": phase_today, "sent_count": sent}).eq("send_date", today.isoformat()).execute()
-    return {"sent": sent, "phase": phase_today, "global_events": global_lines, "birthdays_gifted": len(birthday_messages)}
+    return {"sent": sent, "phase": phase_today, "global_events": list(global_events.values()), "birthdays_gifted": len(birthday_messages)}

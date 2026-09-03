@@ -636,6 +636,11 @@ class BlendAnswerRequest(BaseModel):
     # cohesive interpretation, like a Solar Return or Composite chart,
     # rather than answering one specific question.
     interpretive: bool = False
+    # See sentence_range_override's docstring entry on blend_answer
+    # itself for why this exists -- optional, only used by a caller
+    # whose ingredient count doesn't mean what it means for
+    # interpretive's own default scaling.
+    sentence_range_override: str | None = None
 
 
 @app.post("/blend-answer")
@@ -646,7 +651,7 @@ def get_blended_answer(req: BlendAnswerRequest):
     returns one direct, cohesive answer to the actual question asked."""
     try:
         ingredient_tuples = [(item[0], item[1]) for item in req.ingredients]
-        message = ce.blend_answer(ingredient_tuples, req.question, detailed=req.detailed, allow_web_search=req.allow_web_search, interpretive=req.interpretive)
+        message = ce.blend_answer(ingredient_tuples, req.question, detailed=req.detailed, allow_web_search=req.allow_web_search, interpretive=req.interpretive, sentence_range_override=req.sentence_range_override)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"message": message}

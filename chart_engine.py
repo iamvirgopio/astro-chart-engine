@@ -622,7 +622,7 @@ ECLIPSE_DAY_GUIDANCE = {
 }
 
 
-def _blend_ingredients_into_answer(ingredients, task_instruction, question_context=None, api_key=None, sentence_range="2-5", max_tokens=300, allow_web_search=False, interpretive=False):
+def _blend_ingredients_into_answer(ingredients, task_instruction, question_context=None, api_key=None, sentence_range="2-5", max_tokens=300, allow_web_search=False, interpretive=False, stylist_voice=False):
     """
     THE single shared blending function for every question-answering
     surface in the app—vibe of day, the main reading engine, synastry
@@ -664,6 +664,24 @@ def _blend_ingredients_into_answer(ingredients, task_instruction, question_conte
         Ahead), told the model to strip out the interpretation itself
         as "commentary," which is exactly what happened in practice --
         a real, repeatable bug, not a style preference to tune.
+    stylist_voice: a third, genuinely separate voice, only for Star
+        Stylist, added after both of the above were tried on it in turn
+        and both failed in different, real, reported ways -- default
+        produced a bare "Hair: / Makeup: / Outfit: / Accessories:"
+        recitation (or, once reworded to warn against exactly that, a
+        row of clipped one-item sentence fragments with no connective
+        tissue between them -- textually prohibited, still what the
+        model actually produced), and interpretive produced justified,
+        over-explained prose that kept re-adding a closing summary
+        sentence and trailing "because/which means" clauses despite
+        several rounds of caller-level examples naming that exact
+        pattern to cut. Both are shared by other callers this app
+        depends on (Year Ahead, vibe of day, synastry, and more), so
+        rather than keep bending either one further to fit a caller it
+        was never built for -- and risking a change here showing up as
+        an unrelated regression somewhere else entirely -- this is its
+        own isolated branch below, changeable without touching
+        default's or interpretive's text at all.
     """
     import os, json as jsonlib, urllib.request
     key = api_key or os.environ.get("ANTHROPIC_API_KEY")
@@ -674,6 +692,9 @@ def _blend_ingredients_into_answer(ingredients, task_instruction, question_conte
     question_block = f'They asked: "{question_context}"\n\n' if question_context else ""
 
     opening_instruction = (
+        f"You write {sentence_range} sentences of real, structured prose {task_instruction}, "
+        "based ONLY on the real astrological observations given below.\n\n"
+        if stylist_voice else
         f"You write {sentence_range} sentences of real, structured prose {task_instruction}, "
         "based ONLY on the real astrological observations given below. Break it into short "
         "paragraphs—one per distinct time period or theme—separated by a blank line "
@@ -695,6 +716,29 @@ def _blend_ingredients_into_answer(ingredients, task_instruction, question_conte
         "reading you can from what's genuinely there rather than declining to answer—there is "
         "always enough to say something real.\n\n"
         + (
+            "Voice: write like an in-app personal shopper describing a look to a client she "
+            "knows well\u2014warm, direct, precise, confident. Connected, flowing sentences "
+            "only, never one clipped fragment per item with no link between them. Join related "
+            "items into the same sentence the way a person would actually say them out loud. "
+            "For example, write \"Wear a cream linen button-up, left open over a fitted ivory "
+            "slip dress, with tailored linen shorts in the same cream\" as ONE sentence\u2014never "
+            "\"A cream linen button-up. A fitted ivory slip dress. Tailored linen shorts.\" as "
+            "three separate, disconnected ones. That fragmented pattern is the single most "
+            "important thing to avoid here.\n\n"
+            "When you name a placement, name its actual sign too: \"your Moon in Cancer,\" not "
+            "just \"your Moon side\"\u2014the sign is a concrete fact, not decoration, and it's "
+            "what makes this feel written in her actual chart. Only name a sign inside a "
+            "sentence that also gives a real instruction; a sentence that's only about what a "
+            "placement wants or how it reads, with nothing to actually wear, gets cut entirely "
+            "even if it correctly names the sign.\n\n"
+            "Just enough detail for her to picture the look and see herself in it\u2014not a "
+            "novel. No opening sentence setting a mood before the styling starts, and no "
+            "closing line about what the look says about her or how she'll come across. If a "
+            "phrase only justifies or reassures rather than adding a new physical detail (\"if "
+            "you want to feel like yourself,\" \"something you can move in\"), cut it. Skip "
+            "vague intensifiers like \"real,\" \"genuine,\" or \"genuinely\" unless they're "
+            "doing actual work, and avoid a \"not A\u2014it's B\" contrastive clause.\n\n"
+            if stylist_voice else
             "Voice: say what this means, plainly and directly—the way you'd tell a friend in "
             "person, not write it up as a report. Fold the real fact into the sentence that "
             "explains it, instead of stating the fact and then unpacking it separately "
@@ -3309,7 +3353,7 @@ def _normalize_dashes(text):
     return text
 
 
-def blend_answer(ingredients, question_text, api_key=None, detailed=False, allow_web_search=False, interpretive=False, sentence_range_override=None):
+def blend_answer(ingredients, question_text, api_key=None, detailed=False, allow_web_search=False, interpretive=False, sentence_range_override=None, stylist_voice=False):
     """
     Generic blending entry point for surfaces where the real content
     library lives on the FRONTEND (synastry's 78-pair library, location's
@@ -3317,7 +3361,9 @@ def blend_answer(ingredients, question_text, api_key=None, detailed=False, allow
     this engine—takes whatever real ingredients that page already
     gathered and blends them into one direct answer, without needing the
     content duplicated server-side. Same shared voice rules as every
-    other blending call.
+    other blending call, except for a caller using stylist_voice (see
+    its own docstring entry on _blend_ingredients_into_answer)—that one
+    runs on its own dedicated voice instead.
 
     detailed=True gives real room for something that's supposed to be
     genuinely thorough (like the lookbook's "down to the accessories"
@@ -3407,15 +3453,22 @@ def blend_answer(ingredients, question_text, api_key=None, detailed=False, allow
         api_key=api_key,
         allow_web_search=allow_web_search,
         interpretive=interpretive,
+        stylist_voice=stylist_voice,
         **kwargs,
     )
-    if detailed and not interpretive:
+    if detailed and not interpretive and not stylist_voice:
         # This second pass exists specifically to strip out
         # interpretation and keep only concrete facts—exactly
         # backwards for an interpretive caller, whose entire point is
         # the interpretation. Running it unconditionally whenever
         # detailed=True (which interpretive callers also need, for the
         # longer token budget) would silently undo the fix above.
+        # Also wrong for stylist_voice specifically: that voice is
+        # allowed one deliberate exception (naming a placement's sign
+        # when it's attached to a real instruction), which this pass
+        # has no awareness of and would very likely strip right back
+        # out as "commentary," quietly undoing the whole reason
+        # stylist_voice exists as its own branch in the first place.
         result = _cut_commentary(result, api_key=api_key)
     # The model's own dash style is independent of whatever formatting
     # the prompt itself uses—sweeping every " -- " out of this file's

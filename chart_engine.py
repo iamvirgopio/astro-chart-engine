@@ -3526,27 +3526,34 @@ def blend_answer(ingredients, question_text, api_key=None, detailed=False, allow
         **({"model": "claude-opus-5"} if stylist_voice else {}),
         **kwargs,
     )
-    if detailed and not interpretive and not stylist_voice:
+    if detailed and not interpretive:
         # This second pass exists specifically to strip out
         # interpretation and keep only concrete facts—exactly
         # backwards for an interpretive caller, whose entire point is
         # the interpretation. Running it unconditionally whenever
         # detailed=True (which interpretive callers also need, for the
         # longer token budget) would silently undo the fix above.
-        # Excluded for stylist_voice again -- not the earlier mistake
-        # of assuming it would strip sign-naming (checked and it
-        # doesn't), but deliberately, for a specific experiment: after
-        # heavy rule accumulation kept producing diminishing, uneven
-        # returns, stylist_voice's own voice text was stripped back
-        # down to plainly-stated preferences with one example instead
-        # of an ever-growing rulebook. Running this second, still
-        # heavily-ruled pass afterward would immediately recontaminate
-        # that test -- the point is to see what a comparatively
-        # unconstrained Opus actually produces on its own, not a
-        # blend of a lean first pass and a strict second one. If this
-        # experiment shows the lean version isn't sufficient, this
-        # pass is the natural first thing to re-enable, not a prompt
-        # rewrite.
+        # Was excluded for stylist_voice for one deliberate experiment:
+        # with heavy rule accumulation producing diminishing, uneven
+        # returns, the voice text was stripped down to plainly-stated
+        # preferences with one example, and this pass turned off too,
+        # to see what a comparatively unconstrained Opus actually
+        # produced on its own, with nothing cleaning up after it.
+        # Real result from that test: the lean prompt alone fixed two
+        # genuine problems (third-person "her" instead of "your," and
+        # a recurring closing-summary sentence), but trailing
+        # justification clauses ("because it reads right in a festival
+        # field and right again in a steakhouse booth") showed up just
+        # as often as they did under the old, heavily-ruled prompt.
+        # That's the actual answer the experiment was for: this
+        # specific pattern isn't caused by rule clutter, since a
+        # genuinely lean prompt still produces it just as often -- it
+        # looks like a real default tendency of the underlying task,
+        # not something prompt wording alone reliably prevents at
+        # either length. Re-enabled with that evidence in hand, not
+        # reflexively -- the lean voice text stays as-is, since it's
+        # independently responsible for the two real improvements
+        # above and this pass has no bearing on either of those.
         result = _cut_commentary(
             result, api_key=api_key,
             **({"model": "claude-opus-5"} if stylist_voice else {}),

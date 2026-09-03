@@ -649,9 +649,17 @@ def _blend_ingredients_into_answer(ingredients, task_instruction, question_conte
         about, not reflexively on every call.
     interpretive: swaps the default strict "concrete facts only, cut
         all commentary" voice for one that explains actual meaning and
-        implications instead. The default voice was built for and is
-        correct for Star Stylist—state the item, cut anything about
-        how it reads or feels. But that same rule, forced onto a caller
+        implications instead. Star Stylist used to run on the default,
+        strict voice—but that turned out to be the actual cause of two
+        real, reported problems at once: it produced a bare "Hair: /
+        Makeup: / Outfit: / Accessories:" recitation instead of real
+        sentences (a system-level instruction to cut anything past bare
+        facts directly overrides any caller-level request to write flowing
+        prose), and it likely also weakened the model's occasion-matching,
+        since a mode built to suppress reasoning about how something
+        reads or feels isn't suited to judging whether a look fits a
+        specific occasion. Switched to interpretive for this reason.
+        Elsewhere, the same strict default rule, forced onto a caller
         whose entire job IS explaining what something means (Year
         Ahead), told the model to strip out the interpretation itself
         as "commentary," which is exactly what happened in practice --

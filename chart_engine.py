@@ -735,41 +735,16 @@ def _blend_ingredients_into_answer(ingredients, task_instruction, question_conte
         "reading you can from what's genuinely there rather than declining to answer—there is "
         "always enough to say something real.\n\n"
         + (
-            "Voice: write like an in-app personal shopper describing a look to a client she "
-            "knows well\u2014warm, direct, precise, confident. Connected, flowing sentences "
-            "only, never one clipped fragment per item with no link between them. Join related "
-            "items into the same sentence the way a person would actually say them out loud. "
-            "For example, write \"Wear a cream linen button-up, left open over a fitted ivory "
-            "slip dress, with tailored linen shorts in the same cream\" as ONE sentence\u2014never "
-            "\"A cream linen button-up. A fitted ivory slip dress. Tailored linen shorts.\" as "
-            "three separate, disconnected ones. That fragmented pattern is the single most "
-            "important thing to avoid here.\n\n"
-            "When you name a placement, name its actual sign too: \"your Moon in Cancer,\" not "
-            "just \"your Moon side\"\u2014the sign is a concrete fact, not decoration, and it's "
-            "what makes this feel written in her actual chart. For Rising specifically, say "
-            "\"her Libra Rising,\" never \"her Rising in Libra\"\u2014that's the natural way "
-            "people actually say it, unlike a planet, which does take \"in\" (\"Venus in "
-            "Scorpio\" stays as is). Only name a sign inside a sentence that also gives a real "
-            "instruction; a sentence that's only about what a placement wants or how it reads, "
-            "with nothing to actually wear, gets cut entirely even if it correctly names the "
-            "sign. Two real examples of exactly that to cut: "
-            "\"Your Moon in Taurus wants ease and texture, and a bakery is exactly the kind of "
-            "place where that reads as intentional rather than casual,\" and \"which your "
-            "Mercury in Libra already knows how to do.\" Compare to what belongs: \"Her Libra "
-            "Rising means whatever you choose should feel considered and balanced,\" which "
-            "names the sign AND tells her something to actually do.\n\n"
-            "Just enough detail for her to picture the look and see herself in it\u2014not a "
-            "novel. No opening sentence setting a mood before the styling starts, and no "
-            "closing line about what the look says about her, how she'll come across, or "
-            "whether she can \"trust\" the choice\u2014a real example of exactly that to cut: "
-            "\"Your Libra Rising means you'll naturally look put-together even in something "
-            "this relaxed, so you can trust the simplicity here\u2014the balance is already "
-            "built in.\" Before finishing, check your own last sentence: if it's about her "
-            "overall impression rather than a specific thing to wear, delete it. If a "
-            "phrase only justifies or reassures rather than adding a new physical detail (\"if "
-            "you want to feel like yourself,\" \"something you can move in\"), cut it. Skip "
-            "vague intensifiers like \"real,\" \"genuine,\" or \"genuinely\" unless they're "
-            "doing actual work, and avoid a \"not A\u2014it's B\" contrastive clause.\n\n"
+            "Voice: address the person directly as \"you\" throughout\u2014never \"her\" or "
+            "\"she\" anywhere in the reading. Write like an in-app personal shopper describing "
+            "this exact look to a familiar, regular client, always speaking directly to that "
+            "client as \"you\": warm, direct, confident, concise. When you mention a "
+            "placement, name its sign too (\"your Moon in Taurus,\" \"your Libra Rising\")"
+            "\u2014that's what makes this feel written in your actual chart. State each "
+            "styling choice plainly; don't explain why it works or what it says about you, "
+            "and don't end with a line summarizing the whole look. For example: \"Wear a "
+            "fitted cream top under a soft taupe cardigan, with dark jeans and a single gold "
+            "ring.\"\n\n"
             if stylist_voice else
             "Voice: say what this means, plainly and directly—the way you'd tell a friend in "
             "person, not write it up as a report. Fold the real fact into the sentence that "
@@ -3551,24 +3526,27 @@ def blend_answer(ingredients, question_text, api_key=None, detailed=False, allow
         **({"model": "claude-opus-5"} if stylist_voice else {}),
         **kwargs,
     )
-    if detailed and not interpretive:
+    if detailed and not interpretive and not stylist_voice:
         # This second pass exists specifically to strip out
         # interpretation and keep only concrete facts—exactly
         # backwards for an interpretive caller, whose entire point is
         # the interpretation. Running it unconditionally whenever
         # detailed=True (which interpretive callers also need, for the
         # longer token budget) would silently undo the fix above.
-        # Previously excluded for stylist_voice too, on the assumption
-        # this pass would strip sign-naming right back out as
-        # "commentary" -- that assumption was never actually checked
-        # against this function's real instruction text, and turned
-        # out to be wrong: it explicitly preserves "any short, direct
-        # reference to an actual placement (a sign, planet)" while
-        # cutting exactly the justification and closing-summary
-        # patterns that kept surviving first-pass prompting alone, no
-        # matter how many rounds of examples were added there. Turned
-        # back on here after actually reading the function, not
-        # assuming what it does.
+        # Excluded for stylist_voice again -- not the earlier mistake
+        # of assuming it would strip sign-naming (checked and it
+        # doesn't), but deliberately, for a specific experiment: after
+        # heavy rule accumulation kept producing diminishing, uneven
+        # returns, stylist_voice's own voice text was stripped back
+        # down to plainly-stated preferences with one example instead
+        # of an ever-growing rulebook. Running this second, still
+        # heavily-ruled pass afterward would immediately recontaminate
+        # that test -- the point is to see what a comparatively
+        # unconstrained Opus actually produces on its own, not a
+        # blend of a lean first pass and a strict second one. If this
+        # experiment shows the lean version isn't sufficient, this
+        # pass is the natural first thing to re-enable, not a prompt
+        # rewrite.
         result = _cut_commentary(
             result, api_key=api_key,
             **({"model": "claude-opus-5"} if stylist_voice else {}),

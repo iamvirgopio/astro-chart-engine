@@ -3313,8 +3313,16 @@ def _cut_commentary(raw_text, api_key=None):
     meant ("Your Rising in Libra means whatever you choose should feel
     considered and balanced, so...") was getting cut as a whole
     clause, sign included, rather than having only the meaning-
-    explaining part removed. The instruction below now shows a worked
-    example of exactly that split.
+    explaining part removed. A first attempt at fixing that used a
+    colon-based worked example ("Your Rising in Libra: wear a fitted
+    cream top") to illustrate the split -- but a rewriting model
+    reliably treats a worked example as a template, not an
+    illustration, and applied that exact colon structure to every
+    sign mention in the piece, recreating the original "Hair: /
+    Makeup: /" labeled-list problem this whole pass exists to prevent,
+    just with placement names as the new labels. The instruction below
+    now uses a pure-prose example with no colon, and explicitly
+    forbids repeating a "Placement: detail" pattern more than once.
     """
     import os, json as jsonlib, urllib.request
     key = api_key or os.environ.get("ANTHROPIC_API_KEY")
@@ -3325,21 +3333,28 @@ def _cut_commentary(raw_text, api_key=None):
         "fabric, and any placement name paired with its sign (like \"Venus in Scorpio\" or "
         "\"your Rising in Libra\"). A sign name is a protected fact just like an item or "
         "color\u2014when it appears in a sentence that ALSO explains what the placement means "
-        "or wants, cut only the explaining part and keep the sign name attached to whatever "
-        "concrete instruction is nearby, never delete the sign along with the explanation "
-        "around it. For example, rewrite \"Your Rising in Libra means whatever you choose "
-        "should feel considered and balanced, so wear a fitted cream top\" into something "
-        "like \"Your Rising in Libra: wear a fitted cream top that feels considered and "
-        "balanced\"\u2014the sign survives, only the \"means...so\" framing is cut. Cut "
-        "everything else\u2014specifically, cut any clause that explains what an item or "
-        "placement means, signals, achieves, or how it 'reads' to other people, when nothing "
-        "concrete is attached to it at all; cut any opening sentence that doesn't name a "
-        "concrete item; cut any closing sentence summarizing an overall feeling, presence, or "
-        "identity instead of naming an item. If a sentence is entirely commentary with no "
-        "concrete fact and no sign name in it at all, delete the whole sentence. Do not add "
-        "anything new. Do not soften or rephrase the facts that stay\u2014only remove what "
-        "doesn't belong. Plain text only, no markdown. Return ONLY the rewritten text, "
-        "nothing else\u2014no preamble, no explanation of what you changed."
+        "or wants, cut only the explaining part and fold the sign into the same flowing "
+        "sentence as the instruction, in real prose\u2014never with a colon between them. For "
+        "example, rewrite \"Your Rising in Libra means whatever you choose should feel "
+        "considered and balanced, so wear a fitted cream top\" into something like \"Wear a "
+        "fitted cream top\u2014the considered, balanced choice your Libra Rising is drawn to,\" "
+        "not \"Your Rising in Libra: wear a fitted cream top.\" The sign survives, folded "
+        "naturally into one sentence, never set off with a colon as its own label. NEVER "
+        "repeat a \"Placement: detail\" or \"Sign: detail\" pattern more than once across the "
+        "whole piece\u2014even a single repetition turns the writing back into a labeled list, "
+        "which is exactly what this pass exists to prevent, just with placement names as the "
+        "labels instead of \"Hair:\" or \"Outfit:\". Cut everything else\u2014specifically, cut "
+        "any clause that explains what an item or placement means, signals, achieves, or how "
+        "it 'reads' to other people, when nothing concrete is attached to it at all; cut any "
+        "opening sentence that doesn't name a concrete item; cut any closing sentence "
+        "summarizing an overall feeling, presence, or identity instead of naming an item\u2014"
+        "and never replace a cut closing sentence with a bare fragment of tag-words instead "
+        "(\"Cream linens, gold, soft texture.\" is not an acceptable substitute for a deleted "
+        "sentence; a real sentence or nothing, never a noun fragment). If a sentence is "
+        "entirely commentary with no concrete fact and no sign name in it at all, delete the "
+        "whole sentence. Do not add anything new. Do not soften or rephrase the facts that "
+        "stay\u2014only remove what doesn't belong. Plain text only, no markdown. Return ONLY "
+        "the rewritten text, nothing else\u2014no preamble, no explanation of what you changed."
     )
     payload = jsonlib.dumps({
         "model": "claude-haiku-4-5-20251001",

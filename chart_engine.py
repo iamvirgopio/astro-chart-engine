@@ -3334,18 +3334,25 @@ def blend_answer(ingredients, question_text, api_key=None, detailed=False, allow
     knows first and search only when that's genuinely insufficient,
     not to search reflexively on every call.
 
-    sentence_range_override: bypasses interpretive's own ingredient-count
-        scaling below, for a caller whose ingredient count doesn't mean
-        what it means for interpretive's original use case. That scaling
-        was tuned on the assumption that more ingredients means more
-        distinct themes each needing real, separate coverage (Year
-        Ahead's 8 time periods, 3-5 sentences apiece). The lookbook broke
-        that assumption—its ingredients are options to selectively choose
-        from, not things to explain exhaustively, so 8 style ingredients
-        auto-scaled to a 24-40 sentence range meant the model padded out
-        length by explaining nearly every placement instead of focusing
-        on the one or two that actually fit the occasion. This lets a
-        caller like that specify its own fixed, appropriate range instead.
+    sentence_range_override: sets a fixed sentence_range directly,
+        regardless of interpretive's value. Works for a non-interpretive
+        caller too (it did not originally -- the check lived inside the
+        interpretive branch, so a non-interpretive caller supplying this
+        had it silently ignored in favor of this function's own bare
+        "2-5" default, with no error surfaced anywhere). For an
+        interpretive caller, this bypasses interpretive's own
+        ingredient-count scaling below, for a caller whose ingredient
+        count doesn't mean what it means for interpretive's original use
+        case. That scaling was tuned on the assumption that more
+        ingredients means more distinct themes each needing real,
+        separate coverage (Year Ahead's 8 time periods, 3-5 sentences
+        apiece). The lookbook broke that assumption—its ingredients are
+        options to selectively choose from, not things to explain
+        exhaustively, so 8 style ingredients auto-scaled to a 24-40
+        sentence range meant the model padded out length by explaining
+        nearly every placement instead of focusing on the one or two
+        that actually fit the occasion. This lets a caller like that
+        specify its own fixed, appropriate range instead.
     """
     if not ingredients:
         raise ValueError("No ingredients given to blend")
@@ -3357,38 +3364,42 @@ def blend_answer(ingredients, question_text, api_key=None, detailed=False, allow
         # for this case rather than raising the shared detailed default
         # for every other caller that doesn't need it.
         kwargs["max_tokens"] = max(kwargs.get("max_tokens", 300), 900)
-    if interpretive:
-        if sentence_range_override:
-            # A caller-specified range bypasses the ingredient-count
-            # scaling below entirely -- see the sentence_range_override
-            # docstring entry above for why that scaling doesn't fit
-            # every interpretive caller.
-            kwargs["sentence_range"] = sentence_range_override
-            override_high = int(sentence_range_override.split("-")[-1])
-            kwargs["max_tokens"] = max(kwargs.get("max_tokens", 300), override_high * 75 + 300)
-        else:
-            # Length scales with how much there actually is to interpret,
-            # rather than a single fixed range for every caller. A
-            # year-ahead reading with 8 real, distinct time periods
-            # genuinely needs room—3-5 sentences per theme to cover the
-            # mechanism, the meaning, and what to do about it. A 3-card
-            # tarot spread interpreting the same way needs a fraction of
-            # that; forcing it into the same fixed range that was tuned for
-            # 8 themes is exactly how a spread meant to be direct and
-            # decisive turns into an unrelated wall of text. The scaling
-            # below reproduces the original 25-40 sentence range almost
-            # exactly at 8 ingredients (24-40), so year-ahead's own tuning
-            # is preserved—everything else now scales proportionally
-            # from that same anchor instead of inheriting its number
-            # regardless of size.
-            low = max(8, len(ingredients) * 3)
-            high = max(15, len(ingredients) * 5)
-            kwargs["sentence_range"] = f"{low}-{high}"
-            # Generous headroom above the high end specifically so a
-            # genuinely long response finishes its last sentence instead of
-            # being cut off mid-word, the same failure this was already
-            # tuned to avoid once before.
-            kwargs["max_tokens"] = max(kwargs.get("max_tokens", 300), high * 75 + 300)
+    if sentence_range_override:
+        # Applies regardless of interpretive's value now -- originally
+        # scoped inside the interpretive branch below, which meant a
+        # non-interpretive caller supplying this would have it silently
+        # ignored and fall through to the function's own bare "2-5"
+        # default instead, with no error or warning that it hadn't
+        # taken effect. Caught this before it shipped by re-checking
+        # the actual code path after deciding lookbook should switch
+        # off interpretive -- would otherwise have quietly undone the
+        # whole point of having an override in the first place.
+        kwargs["sentence_range"] = sentence_range_override
+        override_high = int(sentence_range_override.split("-")[-1])
+        kwargs["max_tokens"] = max(kwargs.get("max_tokens", 300), override_high * 75 + 300)
+    elif interpretive:
+        # Length scales with how much there actually is to interpret,
+        # rather than a single fixed range for every caller. A
+        # year-ahead reading with 8 real, distinct time periods
+        # genuinely needs room—3-5 sentences per theme to cover the
+        # mechanism, the meaning, and what to do about it. A 3-card
+        # tarot spread interpreting the same way needs a fraction of
+        # that; forcing it into the same fixed range that was tuned for
+        # 8 themes is exactly how a spread meant to be direct and
+        # decisive turns into an unrelated wall of text. The scaling
+        # below reproduces the original 25-40 sentence range almost
+        # exactly at 8 ingredients (24-40), so year-ahead's own tuning
+        # is preserved—everything else now scales proportionally
+        # from that same anchor instead of inheriting its number
+        # regardless of size.
+        low = max(8, len(ingredients) * 3)
+        high = max(15, len(ingredients) * 5)
+        kwargs["sentence_range"] = f"{low}-{high}"
+        # Generous headroom above the high end specifically so a
+        # genuinely long response finishes its last sentence instead of
+        # being cut off mid-word, the same failure this was already
+        # tuned to avoid once before.
+        kwargs["max_tokens"] = max(kwargs.get("max_tokens", 300), high * 75 + 300)
     result = _blend_ingredients_into_answer(
         ingredients,
         task_instruction="directly answering their specific question",

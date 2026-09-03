@@ -622,7 +622,7 @@ ECLIPSE_DAY_GUIDANCE = {
 }
 
 
-def _blend_ingredients_into_answer(ingredients, task_instruction, question_context=None, api_key=None, sentence_range="2-5", max_tokens=300, allow_web_search=False, interpretive=False, stylist_voice=False):
+def _blend_ingredients_into_answer(ingredients, task_instruction, question_context=None, api_key=None, sentence_range="2-5", max_tokens=300, allow_web_search=False, interpretive=False, stylist_voice=False, model="claude-haiku-4-5-20251001"):
     """
     THE single shared blending function for every question-answering
     surface in the app—vibe of day, the main reading engine, synastry
@@ -682,6 +682,25 @@ def _blend_ingredients_into_answer(ingredients, task_instruction, question_conte
         an unrelated regression somewhere else entirely -- this is its
         own isolated branch below, changeable without touching
         default's or interpretive's text at all.
+    model: defaults to every existing caller's exact current model
+        (claude-haiku-4-5-20251001), completely unchanged -- Year
+        Ahead, vibe of day, synastry, and everything else that doesn't
+        explicitly pass this stays on Haiku with zero behavior change.
+        blend_answer passes a stronger model (claude-opus-5) here only
+        when stylist_voice=True, after Haiku repeatedly failed to
+        reliably hold several simultaneous nuanced constraints at once
+        (sign-naming, connected prose, cutting justification, no
+        closing summary) despite many rounds of increasingly explicit
+        prompt refinement -- evidence this had become a genuine
+        capability ceiling, not a wording problem prompt text alone
+        could keep closing. A prior attempt at raising the model here
+        caused a silent total failure, but that was a verification
+        failure (an unconfirmed model string, "claude-sonnet-5" with
+        no date suffix, unlike Haiku's own real string), not evidence
+        against a stronger model itself -- claude-opus-5 is confirmed
+        current and correctly formatted directly from this app's own
+        verified model list, not guessed at the way the reverted
+        attempt was.
     """
     import os, json as jsonlib, urllib.request
     key = api_key or os.environ.get("ANTHROPIC_API_KEY")
@@ -727,20 +746,23 @@ def _blend_ingredients_into_answer(ingredients, task_instruction, question_conte
             "important thing to avoid here.\n\n"
             "When you name a placement, name its actual sign too: \"your Moon in Cancer,\" not "
             "just \"your Moon side\"\u2014the sign is a concrete fact, not decoration, and it's "
-            "what makes this feel written in her actual chart. Only name a sign inside a "
-            "sentence that also gives a real instruction; a sentence that's only about what a "
-            "placement wants or how it reads, with nothing to actually wear, gets cut entirely "
-            "even if it correctly names the sign. Two real examples of exactly that to cut: "
+            "what makes this feel written in her actual chart. For Rising specifically, say "
+            "\"her Libra Rising,\" never \"her Rising in Libra\"\u2014that's the natural way "
+            "people actually say it, unlike a planet, which does take \"in\" (\"Venus in "
+            "Scorpio\" stays as is). Only name a sign inside a sentence that also gives a real "
+            "instruction; a sentence that's only about what a placement wants or how it reads, "
+            "with nothing to actually wear, gets cut entirely even if it correctly names the "
+            "sign. Two real examples of exactly that to cut: "
             "\"Your Moon in Taurus wants ease and texture, and a bakery is exactly the kind of "
             "place where that reads as intentional rather than casual,\" and \"which your "
-            "Mercury in Libra already knows how to do.\" Compare to what belongs: \"Your Rising "
-            "in Libra means whatever you choose should feel considered and balanced,\" which "
+            "Mercury in Libra already knows how to do.\" Compare to what belongs: \"Her Libra "
+            "Rising means whatever you choose should feel considered and balanced,\" which "
             "names the sign AND tells her something to actually do.\n\n"
             "Just enough detail for her to picture the look and see herself in it\u2014not a "
             "novel. No opening sentence setting a mood before the styling starts, and no "
             "closing line about what the look says about her, how she'll come across, or "
             "whether she can \"trust\" the choice\u2014a real example of exactly that to cut: "
-            "\"Your Rising in Libra means you'll naturally look put-together even in something "
+            "\"Your Libra Rising means you'll naturally look put-together even in something "
             "this relaxed, so you can trust the simplicity here\u2014the balance is already "
             "built in.\" Before finishing, check your own last sentence: if it's about her "
             "overall impression rather than a specific thing to wear, delete it. If a "
@@ -838,18 +860,15 @@ def _blend_ingredients_into_answer(ingredients, task_instruction, question_conte
     )
 
     payload_dict = {
-        # Reverted to the known-working, correctly-versioned model
-        # string after this exact identifier change lined up precisely
-        # with silent, total API failures (confirmed via the lookbook
-        # fallback catch, which had zero error logging until just now).
-        # Unlike this ID, haiku's real string carries a date suffix
-        # (-20251001)—"claude-sonnet-5" alone was never actually
-        # confirmed valid, and it should not have been guessed at
-        # without a way to verify it from here. If a stronger model is
-        # worth trying again for the tone-consistency issue, it needs
-        # a verified, correctly-versioned identifier first, not another
-        # guess.
-        "model": "claude-haiku-4-5-20251001",
+        # See the model parameter's own docstring entry above for the
+        # full history here -- this now uses whatever was passed in
+        # (defaulting to Haiku, unchanged for every existing caller),
+        # rather than a hardcoded string. The stronger model tried once
+        # before failed silently specifically because that string was
+        # never verified as real ("claude-sonnet-5" with no date
+        # suffix, unlike Haiku's own actual identifier) -- not because
+        # a stronger model doesn't work here.
+        "model": model,
         "max_tokens": max_tokens,
         "temperature": 0.2,
         "system": system_prompt,
@@ -3287,7 +3306,7 @@ def recommend_locations(jd_ut, theme_planets, theme_lines=None, top_n=5, orb_deg
 # calculation needed here, just cross-referencing chart_a's positions
 # against chart_b's using the same find_aspect() logic used for transits.
 
-def _cut_commentary(raw_text, api_key=None):
+def _cut_commentary(raw_text, api_key=None, model="claude-haiku-4-5-20251001"):
     """
     Second pass, one narrow job only: cut commentary, keep facts. Not
     a rewording of the generation prompt again—a genuinely different
@@ -3310,11 +3329,11 @@ def _cut_commentary(raw_text, api_key=None):
     risk to a caller this function wasn't written with in mind.
     Sign-name preservation was tightened after a real report: a sign
     sitting inside a sentence that also explained what the placement
-    meant ("Your Rising in Libra means whatever you choose should feel
+    meant ("Your Libra Rising means whatever you choose should feel
     considered and balanced, so...") was getting cut as a whole
     clause, sign included, rather than having only the meaning-
     explaining part removed. A first attempt at fixing that used a
-    colon-based worked example ("Your Rising in Libra: wear a fitted
+    colon-based worked example ("Your Libra Rising: wear a fitted
     cream top") to illustrate the split -- but a rewriting model
     reliably treats a worked example as a template, not an
     illustration, and applied that exact colon structure to every
@@ -3323,6 +3342,12 @@ def _cut_commentary(raw_text, api_key=None):
     just with placement names as the new labels. The instruction below
     now uses a pure-prose example with no colon, and explicitly
     forbids repeating a "Placement: detail" pattern more than once.
+
+    model: defaults to Haiku, this pass's original model. Its own
+        call site passes claude-opus-5 specifically when stylist_voice
+        is the caller, for the same reason the main generation call
+        was upgraded for that caller too -- see that parameter's own
+        docstring entry on _blend_ingredients_into_answer.
     """
     import os, json as jsonlib, urllib.request
     key = api_key or os.environ.get("ANTHROPIC_API_KEY")
@@ -3331,14 +3356,14 @@ def _cut_commentary(raw_text, api_key=None):
     system_prompt = (
         "Rewrite the text below. Keep every concrete fact exactly: every item, color, fit, "
         "fabric, and any placement name paired with its sign (like \"Venus in Scorpio\" or "
-        "\"your Rising in Libra\"). A sign name is a protected fact just like an item or "
+        "\"your Libra Rising\"). A sign name is a protected fact just like an item or "
         "color\u2014when it appears in a sentence that ALSO explains what the placement means "
         "or wants, cut only the explaining part and fold the sign into the same flowing "
         "sentence as the instruction, in real prose\u2014never with a colon between them. For "
-        "example, rewrite \"Your Rising in Libra means whatever you choose should feel "
+        "example, rewrite \"Your Libra Rising means whatever you choose should feel "
         "considered and balanced, so wear a fitted cream top\" into something like \"Wear a "
         "fitted cream top\u2014the considered, balanced choice your Libra Rising is drawn to,\" "
-        "not \"Your Rising in Libra: wear a fitted cream top.\" The sign survives, folded "
+        "not \"Your Libra Rising: wear a fitted cream top.\" The sign survives, folded "
         "naturally into one sentence, never set off with a colon as its own label. NEVER "
         "repeat a \"Placement: detail\" or \"Sign: detail\" pattern more than once across the "
         "whole piece\u2014even a single repetition turns the writing back into a labeled list, "
@@ -3357,7 +3382,7 @@ def _cut_commentary(raw_text, api_key=None):
         "the rewritten text, nothing else\u2014no preamble, no explanation of what you changed."
     )
     payload = jsonlib.dumps({
-        "model": "claude-haiku-4-5-20251001",
+        "model": model,
         "max_tokens": 700,
         "temperature": 0,
         "system": system_prompt,
@@ -3502,6 +3527,11 @@ def blend_answer(ingredients, question_text, api_key=None, detailed=False, allow
         allow_web_search=allow_web_search,
         interpretive=interpretive,
         stylist_voice=stylist_voice,
+        # Stronger model only for stylist_voice specifically -- every
+        # other caller through this function keeps its exact current
+        # Haiku behavior, since the default parameter value is left
+        # untouched here for anything that isn't Star Stylist.
+        **({"model": "claude-opus-5"} if stylist_voice else {}),
         **kwargs,
     )
     if detailed and not interpretive:
@@ -3522,7 +3552,10 @@ def blend_answer(ingredients, question_text, api_key=None, detailed=False, allow
         # matter how many rounds of examples were added there. Turned
         # back on here after actually reading the function, not
         # assuming what it does.
-        result = _cut_commentary(result, api_key=api_key)
+        result = _cut_commentary(
+            result, api_key=api_key,
+            **({"model": "claude-opus-5"} if stylist_voice else {}),
+        )
     # The model's own dash style is independent of whatever formatting
     # the prompt itself uses—sweeping every " -- " out of this file's
     # own text doesn't change what a live generation chooses to write.

@@ -3301,6 +3301,20 @@ def _cut_commentary(raw_text, api_key=None):
     (an orphaned parenthesis, a sentence with no verb) because deleting
     a phrase doesn't repair the sentence around the hole it leaves; an
     actual rewrite can.
+
+    In practice this only ever runs for stylist_voice right now (the
+    other caller of blend_answer's detailed=True, Year Ahead, always
+    passes interpretive=True too, which skips this pass entirely per
+    the condition at its call site)—checked directly rather than
+    assumed, since changing this instruction text is otherwise a real
+    risk to a caller this function wasn't written with in mind.
+    Sign-name preservation was tightened after a real report: a sign
+    sitting inside a sentence that also explained what the placement
+    meant ("Your Rising in Libra means whatever you choose should feel
+    considered and balanced, so...") was getting cut as a whole
+    clause, sign included, rather than having only the meaning-
+    explaining part removed. The instruction below now shows a worked
+    example of exactly that split.
     """
     import os, json as jsonlib, urllib.request
     key = api_key or os.environ.get("ANTHROPIC_API_KEY")
@@ -3308,15 +3322,24 @@ def _cut_commentary(raw_text, api_key=None):
         return raw_text
     system_prompt = (
         "Rewrite the text below. Keep every concrete fact exactly: every item, color, fit, "
-        "fabric, and any short, direct reference to an actual placement (a sign, planet). Cut "
-        "everything else—specifically, cut any clause that explains what an item means, "
-        "signals, achieves, or how it 'reads' to other people; cut any opening sentence that "
-        "doesn't name a concrete item; cut any closing sentence summarizing an overall feeling, "
-        "presence, or identity instead of naming an item. If a sentence is entirely commentary "
-        "with no concrete fact in it at all, delete the whole sentence. Do not add anything new. "
-        "Do not soften or rephrase the facts that stay—only remove what doesn't belong. "
-        "Plain text only, no markdown. Return ONLY the rewritten text, nothing else—no preamble, "
-        "no explanation of what you changed."
+        "fabric, and any placement name paired with its sign (like \"Venus in Scorpio\" or "
+        "\"your Rising in Libra\"). A sign name is a protected fact just like an item or "
+        "color\u2014when it appears in a sentence that ALSO explains what the placement means "
+        "or wants, cut only the explaining part and keep the sign name attached to whatever "
+        "concrete instruction is nearby, never delete the sign along with the explanation "
+        "around it. For example, rewrite \"Your Rising in Libra means whatever you choose "
+        "should feel considered and balanced, so wear a fitted cream top\" into something "
+        "like \"Your Rising in Libra: wear a fitted cream top that feels considered and "
+        "balanced\"\u2014the sign survives, only the \"means...so\" framing is cut. Cut "
+        "everything else\u2014specifically, cut any clause that explains what an item or "
+        "placement means, signals, achieves, or how it 'reads' to other people, when nothing "
+        "concrete is attached to it at all; cut any opening sentence that doesn't name a "
+        "concrete item; cut any closing sentence summarizing an overall feeling, presence, or "
+        "identity instead of naming an item. If a sentence is entirely commentary with no "
+        "concrete fact and no sign name in it at all, delete the whole sentence. Do not add "
+        "anything new. Do not soften or rephrase the facts that stay\u2014only remove what "
+        "doesn't belong. Plain text only, no markdown. Return ONLY the rewritten text, "
+        "nothing else\u2014no preamble, no explanation of what you changed."
     )
     payload = jsonlib.dumps({
         "model": "claude-haiku-4-5-20251001",

@@ -3466,19 +3466,24 @@ def blend_answer(ingredients, question_text, api_key=None, detailed=False, allow
         stylist_voice=stylist_voice,
         **kwargs,
     )
-    if detailed and not interpretive and not stylist_voice:
+    if detailed and not interpretive:
         # This second pass exists specifically to strip out
         # interpretation and keep only concrete facts—exactly
         # backwards for an interpretive caller, whose entire point is
         # the interpretation. Running it unconditionally whenever
         # detailed=True (which interpretive callers also need, for the
         # longer token budget) would silently undo the fix above.
-        # Also wrong for stylist_voice specifically: that voice is
-        # allowed one deliberate exception (naming a placement's sign
-        # when it's attached to a real instruction), which this pass
-        # has no awareness of and would very likely strip right back
-        # out as "commentary," quietly undoing the whole reason
-        # stylist_voice exists as its own branch in the first place.
+        # Previously excluded for stylist_voice too, on the assumption
+        # this pass would strip sign-naming right back out as
+        # "commentary" -- that assumption was never actually checked
+        # against this function's real instruction text, and turned
+        # out to be wrong: it explicitly preserves "any short, direct
+        # reference to an actual placement (a sign, planet)" while
+        # cutting exactly the justification and closing-summary
+        # patterns that kept surviving first-pass prompting alone, no
+        # matter how many rounds of examples were added there. Turned
+        # back on here after actually reading the function, not
+        # assuming what it does.
         result = _cut_commentary(result, api_key=api_key)
     # The model's own dash style is independent of whatever formatting
     # the prompt itself uses—sweeping every " -- " out of this file's

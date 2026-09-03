@@ -870,10 +870,21 @@ def _blend_ingredients_into_answer(ingredients, task_instruction, question_conte
         # a stronger model doesn't work here.
         "model": model,
         "max_tokens": max_tokens,
-        "temperature": 0.2,
         "system": system_prompt,
         "messages": [{"role": "user", "content": "Write the reading."}],
     }
+    # Confirmed directly from Anthropic's own API docs: "On Claude 4.7
+    # and later models and Claude Mythos Preview, temperature is
+    # deprecated and only its default value is accepted, even when
+    # thinking is off." claude-opus-5 is well past that line, so
+    # sending a custom temperature (0.2, chosen for Haiku) causes an
+    # immediate 400 -- confirmed as the actual cause of a real report,
+    # not a guess. Only ever included for the known-safe Haiku model;
+    # omitted entirely for anything else, since a fixed allowlist of
+    # "which models still accept a custom value" would silently break
+    # again the next time a newer model is tried here.
+    if model == "claude-haiku-4-5-20251001":
+        payload_dict["temperature"] = 0.2
     if allow_web_search:
         payload_dict["tools"] = [{"type": "web_search_20250305", "name": "web_search"}]
     payload = jsonlib.dumps(payload_dict).encode("utf-8")
@@ -3381,13 +3392,19 @@ def _cut_commentary(raw_text, api_key=None, model="claude-haiku-4-5-20251001"):
         "stay\u2014only remove what doesn't belong. Plain text only, no markdown. Return ONLY "
         "the rewritten text, nothing else\u2014no preamble, no explanation of what you changed."
     )
-    payload = jsonlib.dumps({
+    payload_dict = {
         "model": model,
         "max_tokens": 700,
-        "temperature": 0,
         "system": system_prompt,
         "messages": [{"role": "user", "content": raw_text}],
-    }).encode("utf-8")
+    }
+    # Same fix, same reason, as the main generation call's payload --
+    # see that one's comment for the full explanation. temperature=0
+    # was chosen for Haiku specifically; claude-opus-5 rejects any
+    # non-default temperature outright with a 400.
+    if model == "claude-haiku-4-5-20251001":
+        payload_dict["temperature"] = 0
+    payload = jsonlib.dumps(payload_dict).encode("utf-8")
     req = urllib.request.Request(
         "https://api.anthropic.com/v1/messages",
         data=payload,

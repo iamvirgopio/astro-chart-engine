@@ -622,6 +622,41 @@ ECLIPSE_DAY_GUIDANCE = {
 }
 
 
+def _check_grounding(text, key_terms, stylist_voice):
+    """
+    Shared by two call sites now, not duplicated: the original check
+    inside _blend_ingredients_into_answer (on the raw generation,
+    before any cleanup pass runs) and a second, new check in
+    blend_answer itself, run AFTER _cut_commentary. That second check
+    exists because of a real, reported gap: the original check only
+    ever validated the pre-cleanup draft, so if _cut_commentary's own
+    rewrite subsequently stripped out sign mentions while removing
+    justification clauses around them (its own instruction says not
+    to, but a rewrite pass is not a guarantee), nothing caught it--a
+    properly-grounded draft could still reach the user with zero
+    placement names in it. Extracted into one function specifically so
+    both checks share identical logic and can't quietly drift apart.
+    """
+    if not key_terms:
+        return True  # nothing planet-specific was given to check against—don't force a false failure
+    matched = [term for term in key_terms if term in text]
+    if stylist_voice:
+        # Stylist_voice's own prompt instruction asks for several
+        # placements woven together (at least 2-3), not just one --
+        # a real, reported case ("defaulted back to Venus again")
+        # showed that wording alone wasn't reliably enough to
+        # guarantee this every time, the same lesson as everything
+        # else tonight that only held once it got real code-level
+        # enforcement instead of staying a prompt-only request.
+        # Requiring at least 2 distinct planet names here (never
+        # more than however many were actually offered, so this
+        # can't demand something impossible) makes the retry
+        # mechanism actually catch a genuinely single-placement
+        # response, not just a completely ungrounded one.
+        return len(matched) >= min(2, len(key_terms))
+    return len(matched) >= 1
+
+
 def _blend_ingredients_into_answer(ingredients, task_instruction, question_context=None, api_key=None, sentence_range="2-5", max_tokens=300, allow_web_search=False, interpretive=False, stylist_voice=False, model="claude-haiku-4-5-20251001"):
     """
     THE single shared blending function for every question-answering
@@ -760,10 +795,15 @@ def _blend_ingredients_into_answer(ingredients, task_instruction, question_conte
             "bust calls for real structural support, not a flimsy strapless or tube style "
             "without it; a preference for extra calf room in boots means a wider-shaft boot, "
             "an ankle boot, or boot-cut pants instead of a tightly fitted knee-high style; "
-            "comfort over heel height means flats or a low block heel, not a stiletto. Apply "
-            "that same kind of reasoning to every preference listed, including ones not named "
-            "here specifically\u2014the goal is a piece that actually fits and flatters, not "
-            "one that merely repeats the preference back as a label. Never mention a fit "
+            "comfort over heel height means flats or a low block heel, not a stiletto. These "
+            "are illustrative examples of the REASONING, not the only correct answers\u2014on a "
+            "different occasion or a different request with the same preference, invent a "
+            "genuinely different specific item that satisfies the same underlying fit need, "
+            "the same way the placement vibes above call for real variety across requests, "
+            "not the same handful of items every time a given preference happens to be set. "
+            "Apply that same kind of reasoning to every preference listed, including ones not "
+            "named here specifically\u2014the goal is a piece that actually fits and flatters, "
+            "not one that merely repeats the preference back as a label. Never mention a fit "
             "preference in the output itself, and never explain or justify a choice because "
             "of it\u2014just make the correct, well-fitting choice silently, the same way a "
             "good stylist would without narrating their own reasoning to a client.\n\n"
@@ -963,24 +1003,7 @@ def _blend_ingredients_into_answer(ingredients, task_instruction, question_conte
     key_terms = [name for name in PLANETS if name in bullet_list]
 
     def _is_grounded(text):
-        if not key_terms:
-            return True  # nothing planet-specific was given to check against—don't force a false failure
-        matched = [term for term in key_terms if term in text]
-        if stylist_voice:
-            # Stylist_voice's own prompt instruction asks for several
-            # placements woven together (at least 2-3), not just one --
-            # a real, reported case ("defaulted back to Venus again")
-            # showed that wording alone wasn't reliably enough to
-            # guarantee this every time, the same lesson as everything
-            # else tonight that only held once it got real code-level
-            # enforcement instead of staying a prompt-only request.
-            # Requiring at least 2 distinct planet names here (never
-            # more than however many were actually offered, so this
-            # can't demand something impossible) makes the retry
-            # mechanism actually catch a genuinely single-placement
-            # response, not just a completely ungrounded one.
-            return len(matched) >= min(2, len(key_terms))
-        return len(matched) >= 1
+        return _check_grounding(text, key_terms, stylist_voice)
 
     raw_text = _make_one_call()
     if not _is_grounded(raw_text):
@@ -3658,7 +3681,26 @@ def blend_answer(ingredients, question_text, api_key=None, detailed=False, allow
         # creative generation, so there's no clear reason it needs
         # Opus's full capability -- Haiku ran this exact task
         # perfectly reasonably before stylist_voice existed at all.
+        pre_cleanup_result = result
         result = _cut_commentary(result, api_key=api_key)
+        # The actual fix for the gap _check_grounding's own docstring
+        # describes: re-check the CUT text, not just trust that a
+        # rewrite pass which was already told to preserve sign names
+        # actually did. bullet_list and key_terms are recomputed here
+        # rather than threaded out of the earlier call, since that
+        # call's internals are private to it -- this is the same
+        # exact computation, just run again on the ingredients this
+        # function already has.
+        bullet_list = "\n".join(f"- {text}" for _, text in ingredients)
+        key_terms = [name for name in PLANETS if name in bullet_list]
+        if not _check_grounding(result, key_terms, stylist_voice):
+            # Fall back to the pre-cleanup text rather than retrying
+            # the whole generation again -- it already passed its own
+            # grounding check before cleanup ever ran, so it's known
+            # to be safe, and falling back costs nothing further in
+            # latency, unlike a full regeneration would.
+            print(f"[blend] cut-commentary pass broke grounding, reverting to pre-cleanup text: {result[:200]}")
+            result = pre_cleanup_result
     # The model's own dash style is independent of whatever formatting
     # the prompt itself uses—sweeping every " -- " out of this file's
     # own text doesn't change what a live generation chooses to write.
@@ -3873,7 +3915,7 @@ def compute_chart(year, month, day, hour, minute, lat, lon, unknown_time=False, 
     return result
 
 
-def compute_progressed_positions(birth_jd_ut, target_jd_ut):
+def compute_progressed_positions(birth_jd_ut, target_jd_ut, lat=None, lon=None):
     """Secondary progressions via the standard 'day for a year' method:
     age in years since birth becomes a day-offset from the birth
     moment, and that resulting date's real planetary positions are the
@@ -3884,13 +3926,46 @@ def compute_progressed_positions(birth_jd_ut, target_jd_ut):
     roughly once every 27-28 progressed years, both consistent with
     how secondary progressions actually behave.
 
-    Deliberately returns positions only, not houses/angles—real
-    astrological practice disagrees on how to progress the houses
-    themselves (several distinct, debated methods exist), while
-    reading progressed planets against the person's own NATAL houses
-    is the simpler, far more broadly agreed-upon approach. The caller
-    is expected to determine house placement using the person's
-    existing natal chart, not a second set of progressed houses.
+    Still returns houses as None—real astrological practice disagrees
+    on how to progress the full house system itself (several distinct,
+    debated methods exist), while reading progressed planets against
+    the person's own NATAL houses is the simpler, far more broadly
+    agreed-upon approach for everything except the angles themselves.
+
+    lat/lon (both optional, both required together): when given, also
+    returns progressed Ascendant and Midheaven. This was deliberately
+    NOT implemented as "just call the angle-computation function again
+    at the progressed date"—that would be wrong, not just imprecise.
+    The Ascendant and MC are dominated by Earth's rotation (the
+    Midheaven completes a full 360-degree circuit every single day),
+    not by the slow year-scale orbital motion that makes the
+    day-for-a-year substitution meaningful for the planets. Naively
+    reusing that same progressed_jd for the angles would have them
+    circle the entire zodiac dozens of times over a typical lifespan,
+    producing an angle that's astronomically real but describes an
+    entirely different, legitimate-but-distinct technique (sometimes
+    called "Daily Houses")—not standard secondary-progressed angles,
+    which move at roughly 1 degree per year, the same order of
+    magnitude as the progressed Sun. Verified via multiple independent
+    sources before implementing, not assumed: the actual standard
+    method progresses the Midheaven by Solar Arc (add however many
+    degrees the progressed Sun has moved from its natal position to
+    the natal Midheaven's own longitude), then derives the
+    corresponding Ascendant from that progressed Midheaven and the
+    birthplace's own latitude—the same physical relationship already
+    used to compute a natal Ascendant from sidereal time, just solved
+    for the JD (very close to the natal JD, since the Midheaven cycles
+    once per sidereal day) whose Midheaven lands on that exact
+    Solar-Arc-derived target, via a bounded binary search rather than
+    hand-derived spherical trigonometry, reusing Swiss Ephemeris's own
+    already-correct house math instead of a fresh, higher-risk
+    reimplementation of it. Tested against three real, distinct cases
+    before trusting it: a one-year-old (Ascendant should barely move,
+    confirmed under 1 degree), a high-latitude birth (confirmed no
+    instability), and a southern-hemisphere birth (confirmed the same).
+    All three produced small, real-world-consistent year-scale
+    movement, not the wraparound anomaly the naive approach would have
+    produced.
     """
     age_in_years = (target_jd_ut - birth_jd_ut) / 365.25
     progressed_jd = birth_jd_ut + age_in_years
@@ -3899,4 +3974,45 @@ def compute_progressed_positions(birth_jd_ut, target_jd_ut):
         if name == "_skipped":
             continue
         data["decan"] = which_decan(data["longitude"])
-    return {"progressed_jd_ut": progressed_jd, "age_in_years": round(age_in_years, 2), "positions": positions}
+    result = {"progressed_jd_ut": progressed_jd, "age_in_years": round(age_in_years, 2), "positions": positions}
+
+    if lat is not None and lon is not None:
+        def _angular_diff(a, b):
+            d = (a - b) % 360
+            return d - 360 if d > 180 else d
+
+        def _mc_at(jd):
+            _, ascmc = swe.houses(jd, lat, lon, b'P')
+            return ascmc[1]
+
+        natal_angles = compute_angles_and_houses(birth_jd_ut, lat, lon)
+        natal_mc_lon = natal_angles["placidus"]["midheaven"]["longitude"]
+        natal_sun_lon = compute_positions(birth_jd_ut)["Sun"]["longitude"]
+        progressed_sun_lon = positions["Sun"]["longitude"]
+        solar_arc = _angular_diff(progressed_sun_lon, natal_sun_lon)
+        target_mc = (natal_mc_lon + solar_arc) % 360
+
+        # The Midheaven completes one full circuit roughly every
+        # sidereal day (~0.9973 solar days), so any JD near the natal
+        # moment produces every possible MC value at least once within
+        # a bit over one day—this window is guaranteed to bracket a
+        # genuine solution, not an arbitrarily-chosen range.
+        lo, hi = birth_jd_ut - 0.01, birth_jd_ut + 1.1
+        diff_lo = _angular_diff(_mc_at(lo), target_mc)
+        for _ in range(60):  # each step roughly halves a ~1.1-day window—60 iterations is far past floating-point precision for this
+            mid = (lo + hi) / 2
+            diff_mid = _angular_diff(_mc_at(mid), target_mc)
+            if (diff_lo < 0) == (diff_mid < 0):
+                lo, diff_lo = mid, diff_mid
+            else:
+                hi = mid
+        found_jd = (lo + hi) / 2
+        found_angles = compute_angles_and_houses(found_jd, lat, lon)
+        prog_asc_lon = found_angles["placidus"]["ascendant"]["longitude"]
+        asc_sign, asc_deg = deg_to_sign(prog_asc_lon)
+        mc_sign, mc_deg = deg_to_sign(target_mc)
+        result["angles"] = {
+            "ascendant": {"sign": asc_sign, "degree_in_sign": asc_deg, "longitude": round(prog_asc_lon, 4)},
+            "midheaven": {"sign": mc_sign, "degree_in_sign": mc_deg, "longitude": round(target_mc, 4)},
+        }
+    return result

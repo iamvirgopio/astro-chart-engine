@@ -333,6 +333,141 @@ def which_house(longitude, houses):
     return 12  # fallback, shouldn't normally hit
 
 
+# Fixed, standard correspondences -- not computed, not researched, just
+# the same twelve signs' element and modality every astrology reference
+# agrees on. Didn't exist anywhere in this file before Star Stylist's
+# rebuild needed elemental/modality balance as a real input.
+SIGN_ELEMENT = {
+    "Aries": "Fire", "Leo": "Fire", "Sagittarius": "Fire",
+    "Taurus": "Earth", "Virgo": "Earth", "Capricorn": "Earth",
+    "Gemini": "Air", "Libra": "Air", "Aquarius": "Air",
+    "Cancer": "Water", "Scorpio": "Water", "Pisces": "Water",
+}
+SIGN_MODALITY = {
+    "Aries": "Cardinal", "Cancer": "Cardinal", "Libra": "Cardinal", "Capricorn": "Cardinal",
+    "Taurus": "Fixed", "Leo": "Fixed", "Scorpio": "Fixed", "Aquarius": "Fixed",
+    "Gemini": "Mutable", "Virgo": "Mutable", "Sagittarius": "Mutable", "Pisces": "Mutable",
+}
+# The ten bodies standard elemental/modal-balance readings use -- the
+# four asteroids, the Nodes, Lilith, Chiron, and Pholus are real,
+# computed placements elsewhere in this file, but including them here
+# would dilute what "balance" conventionally means in this kind of
+# reading, which is specifically about the ten classical-plus-modern
+# planets, not the fuller 19-body set this app otherwise tracks.
+BALANCE_BODIES = ["Sun", "Moon", "Mercury", "Venus", "Mars", "Jupiter", "Saturn", "Uranus", "Neptune", "Pluto"]
+
+
+def compute_style_profile(natal_chart, house_system="placidus"):
+    """
+    The real, structured substitute for what a single pre-written vibe
+    string per sign used to do: pulls the actual placements Star
+    Stylist's rebuilt blending logic needs (Ascendant, Sun sign and
+    house, Moon sign, Venus sign and house, Mars sign and house, the
+    2nd/6th/10th house signs, and elemental/modality balance) directly
+    from the chart someone already has, computed once and handed to
+    the generation layer as clean facts -- not prose for the model to
+    reason through, structured data it reasons FROM.
+
+    Cheap enough (a handful of dict lookups and one house-placement
+    call per body, no ephemeris work, no network call) that recomputing
+    it fresh on every request is simpler than caching it and safer than
+    a cache that could silently go stale if a chart is ever recomputed
+    -- the "cache the style profile" idea only pays for itself against
+    a genuinely expensive computation, and this isn't one.
+    """
+    positions = natal_chart["positions"]
+    houses_and_angles = natal_chart.get("houses_and_angles") or {}
+    house_data = houses_and_angles.get(house_system) or {}
+    houses = house_data.get("houses")
+
+    def house_of(planet_name):
+        if not houses or planet_name not in positions:
+            return None
+        return which_house(positions[planet_name]["longitude"], houses)
+
+    def house_sign(house_number):
+        if not houses:
+            return None
+        for h in houses:
+            if h["house"] == house_number:
+                return h["sign"]
+        return None
+
+    element_counts = {"Fire": 0, "Earth": 0, "Air": 0, "Water": 0}
+    modality_counts = {"Cardinal": 0, "Fixed": 0, "Mutable": 0}
+    for body in BALANCE_BODIES:
+        if body in positions and body != "_skipped":
+            sign = positions[body]["sign"]
+            element_counts[SIGN_ELEMENT[sign]] += 1
+            modality_counts[SIGN_MODALITY[sign]] += 1
+
+    return {
+        "ascendant_sign": (house_data.get("ascendant") or {}).get("sign"),
+        "sun_sign": positions.get("Sun", {}).get("sign"),
+        "sun_house": house_of("Sun"),
+        "moon_sign": positions.get("Moon", {}).get("sign"),
+        "venus_sign": positions.get("Venus", {}).get("sign"),
+        "venus_house": house_of("Venus"),
+        "mars_sign": positions.get("Mars", {}).get("sign"),
+        "mars_house": house_of("Mars"),
+        "house_2_sign": house_sign(2),
+        "house_6_sign": house_sign(6),
+        "house_10_sign": house_sign(10),
+        "midheaven_sign": (house_data.get("midheaven") or {}).get("sign"),
+        "element_counts": element_counts,
+        "modality_counts": modality_counts,
+        "dominant_element": max(element_counts, key=element_counts.get),
+        "dominant_modality": max(modality_counts, key=modality_counts.get),
+    }
+
+
+async def fetch_current_weather(lat, lon, api_key):
+    """
+    OpenWeatherMap's free /data/2.5/weather endpoint -- current
+    conditions only (temp, feels-like, description, wind), imperial
+    units. Deliberately NOT the One Call product: UV index lives
+    there, and that product's free tier has historically still
+    required a billing method on file. Rather than make Star
+    Stylist depend on that, UV is left out of this entirely --
+    callers should treat this as best-effort weather context, not a
+    complete forecast, and the generation layer downstream must
+    already work fine without a UV signal since one is never coming
+    from here.
+
+    Returns None on any failure (missing key, network error, bad
+    response) rather than raising -- a caller building a whole
+    outfit recommendation should degrade to occasion-based inference
+    alone, not fail outright because a third-party weather call had
+    a bad moment.
+    """
+    if not api_key:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            resp = await client.get(
+                "https://api.openweathermap.org/data/2.5/weather",
+                params={"lat": lat, "lon": lon, "appid": api_key, "units": "imperial"},
+            )
+            resp.raise_for_status()
+            body = resp.json()
+        main = body.get("main", {})
+        wind = body.get("wind", {})
+        weather_list = body.get("weather", [])
+        return {
+            "temp_f": main.get("temp"),
+            "feels_like_f": main.get("feels_like"),
+            "description": weather_list[0]["description"] if weather_list else None,
+            "wind_mph": wind.get("speed"),
+            # Presence of either key at all means active precipitation
+            # right now -- the actual amount isn't relevant to an
+            # outfit decision, only whether it's happening.
+            "precipitation_now": ("rain" in body) or ("snow" in body),
+        }
+    except Exception as e:
+        print(f"[weather] fetch failed, caller should fall back to occasion-based inference alone: {type(e).__name__}: {e}")
+        return None
+
+
 # Each lens: which houses matter for that kind of question, and which
 # planets get an extra boost when they're the ones making the aspect.
 # House bonus applies when the NATAL planet being aspected sits in one
@@ -772,7 +907,10 @@ async def _blend_ingredients_into_answer(ingredients, task_instruction, question
         "always enough to say something real.\n\n"
         + (
             "Voice: address the person directly as \"you\" throughout\u2014never \"her\" or "
-            "\"she\" anywhere in the reading. Write like an in-app personal shopper describing "
+            "\"she\" anywhere in the reading. Use the Oxford comma in any list of three or "
+            "more items, and a comma before \"and\" or \"or\" joining two full clauses\u2014a "
+            "plain, standing punctuation preference, not something to infer from anywhere "
+            "else. Write like an in-app personal shopper describing "
             "this exact look to a familiar, regular client, always speaking directly to that "
             "client as \"you\": warm, direct, confident, concise. When you mention a "
             "placement, name its sign too (\"your Moon in Taurus,\" \"your Libra Rising\")"
@@ -803,9 +941,13 @@ async def _blend_ingredients_into_answer(ingredients, task_instruction, question
             "instruction (\"a body that skims rather than clings\"; \"to knot at the strap... "
             "instead of adding a real jacket\")\u2014state the actual choice and stop, don't "
             "also name what was rejected; and a colon introducing a list (\"pick the base:\", "
-            "\"keep everything else quiet:\", \"gets exactly one statement:\")\u2014use a plain "
-            "sentence, \"for your [placement],\" or an em dash instead, never a colon-led list "
-            "structure. The test for every clause: does it name a new "
+            "\"keep everything else quiet:\", \"gets exactly one statement:\")\u2014rewrite it as "
+            "an ordinary sentence instead, genuinely varying the actual sentence structure each "
+            "time rather than settling on one fixed substitute\u2014never a colon-led list "
+            "structure. A real, reported case had a single suggested fix for this exact problem "
+            "turn into its own new tic, repeated twice in one short reading\u2014the goal is "
+            "genuine sentence-level variety, not a second fixed pattern replacing the first. The "
+            "test for every clause: does it name a new "
             "concrete item or detail, or does it explain, justify, or narrate the effect of one "
             "already named? Only the first kind survives.\n\n"
             "The placements below each describe a genuine underlying theme or feeling\u2014a "
@@ -2089,6 +2231,285 @@ async def classify_open_question(question_text, valid_lenses, context_descriptio
     if result.get("lens") not in valid_lenses:
         result["lens"] = "general" if "general" in valid_lenses else valid_lenses[0]
     return result
+
+
+async def classify_occasion_context(occasion_text, weather=None, api_key=None):
+    """
+    Star Stylist's real fix for the season/exertion-inference problem
+    tonight's earlier prompt-only attempts kept hitting: rather than
+    asking the SAME model, in the SAME call, to both classify what an
+    occasion practically implies AND invent an outfit around it,
+    that classification is pulled out into its own small, fast, cheap
+    call first -- so the generation call downstream receives clean,
+    structured facts ("high exertion, warm-leaning, casual") instead
+    of raw occasion text it has to interpret on the fly while also
+    trying to be creative. Splitting reasoning from generation this
+    way is a genuinely different mechanism than another instruction
+    paragraph, not a bigger version of the same fix.
+
+    weather (optional): a fetch_current_weather() result, or None if
+    unavailable -- when given, this call can catch a real mismatch
+    (grilling plans against a freezing forecast) instead of blindly
+    trusting the occasion text alone.
+
+    Returns a dict with activity_level, formality, implied_temp_lean,
+    mismatch_flag, and mismatch_note (None when there's no mismatch).
+    Raises on a genuine API failure -- unlike weather, which degrades
+    silently, a classification failure here should be visible to the
+    caller rather than silently producing an ungrounded outfit later.
+    """
+    import os, json as jsonlib, re
+    key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+    if not key:
+        raise RuntimeError("No Anthropic API key configured")
+
+    weather_line = "No weather data available." if not weather else (
+        f"Current weather: {weather.get('temp_f')}\u00b0F, feels like {weather.get('feels_like_f')}\u00b0F, "
+        f"{weather.get('description') or 'no description'}, wind {weather.get('wind_mph')} mph"
+        + (", precipitation happening right now" if weather.get("precipitation_now") else "") + "."
+    )
+
+    system_prompt = (
+        "You classify what a stated occasion practically implies for choosing an outfit, the way a "
+        "real stylist would read it without needing everything spelled out. Given the occasion text and "
+        "whatever weather data is available, return ONLY this JSON object, no markdown, no explanation:\n"
+        '{"activity_level": "low" | "medium" | "high", "formality": "very casual" | "casual" | '
+        '"smart casual" | "business" | "formal", "implied_temp_lean": "warm" | "cool" | "neutral", '
+        '"mismatch_flag": true or false, "mismatch_note": a short string or null}\n\n'
+        "activity_level: how physically active or sedentary the occasion is\u2014carrying/holding someone, "
+        "being on your feet, or sustained movement is high; a meeting or a movie is low.\n"
+        "implied_temp_lean: what the occasion ITSELF implies about temperature, independent of the weather "
+        "data (\"grilling\" implies warm, \"pumpkin patch\" implies cool)\u2014this is about the occasion's "
+        "own implication, not a repeat of the weather data below.\n"
+        "mismatch_flag: true only when the occasion's own implied temperature genuinely contradicts the "
+        "actual weather data given (e.g. a warm-implying occasion against a freezing forecast). False "
+        "whenever no weather data is available at all, or when they don't conflict.\n"
+        "mismatch_note: a short, plain, one-sentence description of the actual conflict when mismatch_flag "
+        "is true, otherwise null."
+    )
+
+    payload = jsonlib.dumps({
+        "model": "claude-haiku-4-5-20251001",
+        "max_tokens": 200,
+        "system": system_prompt,
+        "messages": [{"role": "user", "content": f"Occasion: {occasion_text}\n{weather_line}"}],
+    }).encode("utf-8")
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.post(
+            "https://api.anthropic.com/v1/messages",
+            content=payload,
+            headers={"Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01"},
+        )
+        resp.raise_for_status()
+        body = resp.json()
+    text = body["content"][0]["text"].strip()
+    text = re.sub(r"^```(json)?|```$", "", text.strip(), flags=re.MULTILINE).strip()
+    result = jsonlib.loads(text)
+
+    # Same defensive normalization as every other classifier in this
+    # file -- never trust the model to have stayed inside the given
+    # enum values, even though the prompt states them explicitly.
+    if result.get("activity_level") not in ("low", "medium", "high"):
+        result["activity_level"] = "medium"
+    if result.get("formality") not in ("very casual", "casual", "smart casual", "business", "formal"):
+        result["formality"] = "casual"
+    if result.get("implied_temp_lean") not in ("warm", "cool", "neutral"):
+        result["implied_temp_lean"] = "neutral"
+    result["mismatch_flag"] = bool(result.get("mismatch_flag")) and weather is not None
+    if not result["mismatch_flag"]:
+        result["mismatch_note"] = None
+    return result
+
+
+# Star Stylist's rebuilt voice, kept as one module-level constant rather
+# than inlined in the function below -- long enough that a docstring's
+# worth of context belongs next to it, not buried inside a function
+# body. Two genuinely different kinds of rule live in here together on
+# purpose: the new, stricter directive voice this rebuild specifically
+# asked for (decided not suggested, no re-explaining, no padding), and
+# every anti-pattern already fought and confirmed real over the course
+# of one long session (undergarments, colon-lists, contrastive tails,
+# the six-part-formula collapse, color-word-banking, self-consistency
+# between stated reasoning and actual item choices). None of the new
+# rules contradict the old ones, so all of it carries forward together
+# rather than the rebuild silently dropping lessons already paid for.
+STYLE_RECOMMENDATION_SYSTEM_PROMPT = (
+    "You are a working personal stylist speaking directly to a client you know well. You've seen "
+    "their chart, you know their taste, and you're telling them what to wear today\u2014not "
+    "presenting options, not explaining your reasoning, not hedging.\n\n"
+    "Voice:\n"
+    "- Address the person as \"you\" throughout, never \"her\" or \"she.\"\n"
+    "- State the outfit as decided. Never \"I'd suggest,\" \"you might consider,\" \"maybe try,\" "
+    "\"if you're feeling it.\"\n"
+    "- Open with a brief, real read of what the occasion practically involves\u2014how long, how "
+    "physical, what setting\u2014not a generic restatement of the words given. This is the one "
+    "place the occasion gets addressed directly; once the outfit starts, get straight to items, no "
+    "further circling back to the occasion.\n"
+    "- Name a placement's sign when it's the reason for a choice (\"your Moon in Taurus,\" \"your "
+    "Libra Rising\"), but never explain WHY that placement means what it means, and never narrate "
+    "the sign's own reaction (\"wants,\" \"insists,\" \"registers as\")\u2014state the fact and the "
+    "item, nothing invented in between.\n"
+    "- No disclaimers, no \"of course, personal preference matters,\" no filler sign-off that "
+    "recaps the outfit\u2014though a short, detail-free warm close (\"and you're set\") is fine.\n"
+    "- Specific, not vague: real colors, real fabrics, real cuts. Never \"something cozy and "
+    "cute.\"\n"
+    "- Short and confident. If the outfit takes four sentences, it's four sentences\u2014don't pad "
+    "to sound thorough.\n"
+    "- If the occasion and the actual weather genuinely conflict, say so in one brief sentence and "
+    "adjust for the real conditions\u2014don't ignore it, and don't turn it into its own paragraph.\n"
+    "- Oxford comma in any list of three or more items; a comma before \"and\" or \"or\" joining "
+    "two full clauses.\n"
+    "- Never mention a bra, underwear, or any other undergarment, no matter what fit preferences "
+    "are set, unless the occasion itself genuinely involves lingerie, an intimate context, or a "
+    "honeymoon.\n"
+    "- No colon introducing a list (\"gets one thing:\", \"keep it quiet:\")\u2014rewrite as an "
+    "ordinary sentence, genuinely varied each time. No \"rather than X\" or \"instead of X\" "
+    "contrastive tail on an instruction\u2014state the actual choice and stop, don't also name what "
+    "was rejected.\n\n"
+    "How the chart actually drives the pick\u2014this is reference logic for your own reasoning, "
+    "never something to narrate or explain in the output:\n"
+    "- Ascendant and Venus together set the default aesthetic language: overall silhouette and "
+    "color sensibility.\n"
+    "- Moon, the real weather, and how physically active the occasion is together set comfort: "
+    "fabric weight, structure, ease of movement. Being on your feet, carrying or holding another "
+    "person, or sustained activity generates real body heat and demands freedom of movement "
+    "regardless of season\u2014this is a genuine, independent reason to choose breathable, "
+    "lower-weight pieces, on top of whatever the weather itself implies.\n"
+    "- Mars and the occasion's own formality and boldness together set how much of a statement the "
+    "pick makes versus how restrained it stays.\n"
+    "- The 2nd house shapes an instinct toward quality, investment-feeling pieces over disposable "
+    "ones.\n"
+    "- The 10th house and Midheaven matter specifically when the occasion is professional or "
+    "public-facing\u2014image-consciousness goes up.\n"
+    "- The 6th house matters specifically for routine, practical, everyday occasions\u2014"
+    "practicality goes up.\n"
+    "- The dominant element shapes fabric and structure defaults: Fire leans bold and structured, "
+    "Earth leans grounded and tactile, Water leans fluid and draped, Air leans light and "
+    "layered\u2014this is about the person's real overall balance, not any single placement alone.\n"
+    "- The dominant modality shapes how much the pick should vary day to day versus stay "
+    "consistent: Cardinal leans toward trying something genuinely new each time, Fixed toward a "
+    "reliable formula executed well, Mutable toward adapting freely to whatever the specific day "
+    "needs.\n\n"
+    "None of the placements below name any specific item, color, or fabric on purpose\u2014every "
+    "concrete choice has to come from your own reasoning about what would authentically embody "
+    "these themes for this specific occasion, not from a word bank. A real, reported failure: three "
+    "genuinely different occasions all came back as the identical six-part formula (a top, "
+    "straight-leg bottoms, closed-toe shoes, an outer layer, one accent piece, a bag) with only "
+    "colors swapped\u2014that's the vibes supplying the outfit's shape when only the occasion "
+    "should. Decide the shape (how many pieces, whether there's an outer layer at all, dress versus "
+    "separates, how many accessories, what kind of bag or none) from what the occasion itself "
+    "requires; only then let the chart shape which specific colors and fabrics fill that shape in. "
+    "Color spans a genuinely wide real range for any given lean\u2014\"dark and rich\" is not just "
+    "black; think forest green, aubergine, chocolate, ink navy, deep burgundy, espresso, wine, "
+    "burnt umber, and many more. Cycling through the same three or four colors across different "
+    "requests is the same closed-list failure as reusing the same garment shape.\n\n"
+    "Before finishing, check your own item choices against whatever you yourself just said the "
+    "occasion required in your own opening line\u2014a real, reported failure named needing "
+    "washable, easy-care fabric and then recommended a heavyweight knit anyway. If they don't "
+    "genuinely agree, the items are wrong, not the reasoning.\n\n"
+    "Style mode: \"gender-neutral\" means stay genuinely gender-neutral in every category "
+    "reached for (separates over an assumed dress, simple jewelry over anything strongly "
+    "gender-coded), and never mention hair, makeup, or nails at all. Any other style mode "
+    "(feminine, masculine, androgynous, or the person's own typed description) should genuinely "
+    "shape which categories of item get reached for, and hair, makeup, and nails become real, "
+    "included categories styled to match that mode\u2014or the person's own words, for a custom "
+    "lean.\n\n"
+    "If body fit preferences are given, let them genuinely constrain the specific garment invented, "
+    "the way a real stylist would: translate a stated preference into an actual construction "
+    "choice (built-in structure in a top's own straps or lining, a wider boot shaft, a lower "
+    "heel), never into a foundation garment underneath\u2014that reasoning is never a reason to "
+    "mention an undergarment. Invent a genuinely different specific solution each time a "
+    "preference is set, not the same fixed answer every time."
+)
+
+
+async def generate_style_recommendation(
+    style_profile, occasion_text, occasion_classification, weather=None,
+    style_mode=None, style_mode_custom_text=None, body_preferences_text=None, api_key=None,
+):
+    """
+    Star Stylist's rebuilt generation call: takes the structured facts
+    (chart profile, weather, occasion classification\u2014already
+    reasoned through by classify_occasion_context, not raw text this
+    call has to interpret itself) and produces the actual outfit text.
+    Deliberately a new, separate function rather than another branch
+    inside the old ingredient-tuple _blend_ingredients_into_answer--
+    that function's whole shape (a bullet list of pre-written vibe
+    strings) is the architecture this rebuild replaces, not a variant
+    to keep threading new features through.
+    """
+    import json as jsonlib, re
+    key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+    if not key:
+        raise RuntimeError("ANTHROPIC_API_KEY not set—can't make a live call")
+
+    user_facts = {
+        "occasion": occasion_text,
+        "occasion_classification": occasion_classification,
+        "weather": weather,
+        "chart_profile": style_profile,
+        "style_mode": style_mode or "gender-neutral",
+    }
+    if style_mode == "custom" and style_mode_custom_text:
+        user_facts["style_mode_description"] = style_mode_custom_text
+    if body_preferences_text:
+        user_facts["body_fit_preferences"] = body_preferences_text
+    if occasion_classification and occasion_classification.get("mismatch_flag"):
+        # Not left to chance that the model happens to notice this on
+        # its own inside a JSON blob -- the same lesson as everything
+        # else tonight that only held once it moved from "hopefully
+        # notices" to an explicit, separately-flagged instruction.
+        user_facts["real_mismatch_to_address_briefly"] = occasion_classification["mismatch_note"]
+
+    payload = jsonlib.dumps({
+        "model": "claude-opus-5",
+        "max_tokens": 2000,
+        "output_config": {"effort": "low"},
+        "system": STYLE_RECOMMENDATION_SYSTEM_PROMPT,
+        "messages": [{"role": "user", "content": jsonlib.dumps(user_facts)}],
+    }).encode("utf-8")
+
+    # Real placement facts to check the response against, same
+    # grounding-and-retry mechanism proven throughout tonight rather
+    # than a new, unverified one for this new function. Signs, not
+    # planet names, since this new function's actual reference data is
+    # sign placements (Ascendant, Sun, Moon, Venus, Mars), unlike the
+    # old ingredient-tuple function this replaces.
+    key_terms = [v for v in [
+        style_profile.get("ascendant_sign"), style_profile.get("sun_sign"),
+        style_profile.get("moon_sign"), style_profile.get("venus_sign"), style_profile.get("mars_sign"),
+    ] if v]
+
+    async def _make_one_call():
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                content=payload,
+                headers={"Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01"},
+            )
+            resp.raise_for_status()
+            body = resp.json()
+        text = "".join(block.get("text", "") for block in body.get("content", []) if block.get("type") == "text").strip()
+        text = re.sub(r'\*{1,2}([^*\n]+?)\*{1,2}', r'\1', text)
+        text = re.sub(r'(?<!\w)_{1,2}([^_\n]+?)_{1,2}(?!\w)', r'\1', text)
+        return text
+
+    def _is_grounded(text):
+        if not key_terms:
+            return True
+        matched = [t for t in key_terms if t in text]
+        return len(matched) >= min(2, len(key_terms))
+
+    raw_text = await _make_one_call()
+    if not _is_grounded(raw_text):
+        raw_text = await _make_one_call()
+    if not _is_grounded(raw_text):
+        raise RuntimeError("GROUNDING_CHECK_FAILED_TWICE: " + raw_text[:300])
+
+    cleaned = await _cut_commentary(raw_text, api_key=key)
+    if not _is_grounded(cleaned):
+        cleaned = raw_text
+    return _normalize_dashes(cleaned)
 
 
 async def classify_question_multi_lens(question_text, valid_lenses, context_description, target_count=3, api_key=None):
@@ -3610,9 +4031,10 @@ async def _cut_commentary(raw_text, api_key=None, model="claude-haiku-4-5-202510
         "free for the touch tank, nothing swinging into glass\" (cut to just \"a black "
         "leather-trim crossbody\"). Also cut any \"instead of X\" contrastive tail the same way "
         "as a \"rather than\" one (\"to knot at the strap... instead of adding a real jacket\" "
-        "cuts to just the strap instruction), and cut a colon introducing a list (\"pick the "
-        "base:\", \"keep everything else quiet:\", \"gets exactly one statement:\") down to a "
-        "plain sentence, \"for your [placement],\" or an em dash, never a colon-led list. Watch "
+        "cuts to just the strap instruction), and rewrite a colon introducing a list (\"pick the "
+        "base:\", \"keep everything else quiet:\", \"gets exactly one statement:\") as an "
+        "ordinary sentence, genuinely varied each time rather than one fixed substitute\u2014"
+        "never a colon-led list. Watch "
         "specifically for a placement "
         "name followed by what it \"wants,\" \"keeps,\" or \"craves,\" especially paired with "
         "a \"rather than\" or \"instead of\" contrastive tail\u2014that combination is a strong "

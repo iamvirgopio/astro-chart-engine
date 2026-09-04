@@ -197,7 +197,7 @@ class ReadingRequest(BaseModel):
 
 
 @app.post("/reading")
-def get_reading(req: ReadingRequest):
+async def get_reading(req: ReadingRequest):
     """
     The actual question-answering endpoint. Takes a free-text question
     plus the user's already-computed natal chart (fetched from Supabase
@@ -205,7 +205,7 @@ def get_reading(req: ReadingRequest):
     reading or a clarify-screen instruction.
     """
     try:
-        result = ce.handle_question(
+        result = await ce.handle_question(
             req.question, req.natal_chart, req.lat, req.lon,
             req.start_year, req.start_month, req.start_day, req.num_days,
         )
@@ -352,7 +352,7 @@ _BUSINESS_PLANET_THEME_DEFAULT = "a specific, real part of how the business oper
 
 
 @app.post("/year-ahead")
-def get_year_ahead(req: YearAheadRequest):
+async def get_year_ahead(req: YearAheadRequest):
     """The year's real, distinct outer-planet themes, written into one
     genuine overview via the same shared blend function every other
     reading in the app uses—not hand-written content for every
@@ -418,7 +418,7 @@ def get_year_ahead(req: YearAheadRequest):
             ))
         if not ingredients:
             return {"message": "Nothing especially strong from the outer planets stands out this year—a comparatively quiet one, astrologically."}
-        message = ce.blend_answer(
+        message = await ce.blend_answer(
             ingredients,
             f"Explain what {req.year} actually means for {subject_noun} astrologically—not a list of "
             f"transits and dates, but what each real theme below is likely to bring up or require, "
@@ -449,7 +449,7 @@ def get_moon_phases():
 
 
 @app.post("/vibe-of-day")
-def get_vibe_of_day(req: VibeOfDayRequest):
+async def get_vibe_of_day(req: VibeOfDayRequest):
     """
     The real integrated 'horoscope on steroids'—today's transits,
     retrogrades, eclipse (if any), and moon phase, genuinely blended
@@ -484,7 +484,7 @@ def get_vibe_of_day(req: VibeOfDayRequest):
 
         moon_phase_today = ce.moon_phase(jd_ut)
 
-        reading = ce.generate_integrated_vibe_of_day(
+        reading = await ce.generate_integrated_vibe_of_day(
             day_result, req.natal_chart["positions"], natal_houses,
             retrogrades_today, eclipse_today, moon_phase_today,
             today_positions=today_positions, angle_data=house_system_data,
@@ -609,13 +609,13 @@ class ClassifyQuestionMultiRequest(BaseModel):
 
 
 @app.post("/classify-question-multi")
-def classify_question_multi_endpoint(req: ClassifyQuestionMultiRequest):
+async def classify_question_multi_endpoint(req: ClassifyQuestionMultiRequest):
     """Separate endpoint from /classify-question for the same reason
     the underlying function is separate—Chart & Cards needs several
     relevant houses per question, not one, and this keeps that need
     from ever touching the single-lens path other features depend on."""
     try:
-        result = ce.classify_question_multi_lens(
+        result = await ce.classify_question_multi_lens(
             question_text=req.question, valid_lenses=req.valid_lenses,
             context_description=req.context_description, target_count=req.target_count,
         )
@@ -656,26 +656,26 @@ class BlendAnswerRequest(BaseModel):
 
 
 @app.post("/blend-answer")
-def get_blended_answer(req: BlendAnswerRequest):
+async def get_blended_answer(req: BlendAnswerRequest):
     """Generic blending endpoint—used by any surface whose real
     content library lives on the frontend (synastry, location, the
     lookbook) rather than in this engine. Takes real ingredients,
     returns one direct, cohesive answer to the actual question asked."""
     try:
         ingredient_tuples = [(item[0], item[1]) for item in req.ingredients]
-        message = ce.blend_answer(ingredient_tuples, req.question, detailed=req.detailed, allow_web_search=req.allow_web_search, interpretive=req.interpretive, sentence_range_override=req.sentence_range_override, stylist_voice=req.stylist_voice)
+        message = await ce.blend_answer(ingredient_tuples, req.question, detailed=req.detailed, allow_web_search=req.allow_web_search, interpretive=req.interpretive, sentence_range_override=req.sentence_range_override, stylist_voice=req.stylist_voice)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"message": message}
 
 
 @app.post("/classify-question")
-def classify_question_endpoint(req: ClassifyQuestionRequest):
+async def classify_question_endpoint(req: ClassifyQuestionRequest):
     """General-purpose free-text classifier, reused for synastry and
     location questions—same invisible-AI routing already used for
     the main reading flow, just with a swappable lens set."""
     try:
-        result = ce.classify_open_question(
+        result = await ce.classify_open_question(
             question_text=req.question, valid_lenses=req.valid_lenses,
             context_description=req.context_description,
         )

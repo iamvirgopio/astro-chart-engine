@@ -363,18 +363,23 @@ def get_year_ahead(req: YearAheadRequest):
 
         hits = ce.scan_year_ahead(req.natal_chart["positions"], req.year, samples=52)
 
-        # Picking the 6 tightest hits overall, with no regard for WHEN
-        # they occur, can (and did) cluster every single one into the
-        # first third of the year while leaving the rest completely
-        # unmentioned—not a genuine year-ahead overview. Six
-        # two-month buckets (not four quarters) each get a guaranteed
-        # pick when one exists, so late-year coverage can't come down
-        # to whichever single quarter-wide pick happened to land in
-        # its earliest month—the actual reason November and
-        # December were going unmentioned even after the quarter fix.
-        # Two extra wildcard slots beyond the six guaranteed ones let
-        # an especially significant cluster still stand out fully.
-        buckets = [(1, 2), (3, 4), (5, 6), (7, 8), (9, 10), (11, 12)]
+        # Real report: even the two-month-pair version of this still
+        # let one month in each pair go completely unmentioned,
+        # whichever had the less exact of the two hits (September and
+        # December specifically, this time, but it could have been
+        # either month in any pair depending on that year's chart).
+        # Guaranteeing coverage per PAIR was never actually the goal --
+        # coverage per INDIVIDUAL month is, so this is now twelve
+        # single-month buckets instead of six paired ones, and the
+        # cap that used to force a choice between which months made
+        # it in is gone entirely: every month with a real transit gets
+        # its tightest-orb hit included, up to all twelve if every
+        # month has one. The reading's own length already scales with
+        # ingredient count in the shared interpretive voice (see
+        # blend_answer's own scaling for why), so a genuinely fuller
+        # year of transits produces a longer reading automatically,
+        # not a separate thing to configure here.
+        buckets = [(m, m) for m in range(1, 13)]
         selected = []
         remaining = list(hits)
         for start_month, end_month in buckets:
@@ -384,11 +389,7 @@ def get_year_ahead(req: YearAheadRequest):
                     selected.append(h)
                     remaining.remove(h)
                     break
-        for h in remaining:
-            if len(selected) >= 8:
-                break
-            selected.append(h)
-        top_hits = sorted(selected[:8], key=lambda h: h["approx_date"])
+        top_hits = sorted(selected, key=lambda h: h["approx_date"])
 
         ingredients = []
         for h in top_hits:

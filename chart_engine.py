@@ -869,6 +869,29 @@ def _blend_ingredients_into_answer(ingredients, task_instruction, question_conte
     # again the next time a newer model is tried here.
     if model == "claude-haiku-4-5-20251001":
         payload_dict["temperature"] = 0.2
+    else:
+        # Confirmed directly from Anthropic's own docs and migration
+        # guidance: "Thinking is on by default on Claude Opus 5" and
+        # "max_tokens now covers thinking and the answer together. A
+        # ceiling you tuned tightly around the visible response...can
+        # truncate mid-answer on Opus 5." max_tokens above was
+        # calculated from sentence_range_override for a short visible
+        # answer alone (e.g. ~1050 for "6-10" sentences) -- on a
+        # thinking model, that budget can be consumed entirely by
+        # thinking tokens before the visible text even starts,
+        # producing exactly the real, reported failure this fixes:
+        # output truncated mid-word, mid-sentence. Given a generous
+        # floor here regardless of the sentence-range math above,
+        # since that math was never designed with thinking in mind.
+        # Effort is also set to "low" -- lower effort is confirmed
+        # "genuinely stronger on Opus 5 than on prior models" per
+        # Anthropic's own effort guidance, and a short creative outfit
+        # description doesn't need deep multi-step reasoning; lower
+        # effort means less of this budget is spent thinking in the
+        # first place, which both cuts cost and further reduces the
+        # chance of this same truncation happening again.
+        payload_dict["max_tokens"] = max(max_tokens, 8000)
+        payload_dict["output_config"] = {"effort": "low"}
     if allow_web_search:
         payload_dict["tools"] = [{"type": "web_search_20250305", "name": "web_search"}]
     payload = jsonlib.dumps(payload_dict).encode("utf-8")
@@ -3385,9 +3408,17 @@ def _cut_commentary(raw_text, api_key=None, model="claude-haiku-4-5-20251001"):
     # Same fix, same reason, as the main generation call's payload --
     # see that one's comment for the full explanation. temperature=0
     # was chosen for Haiku specifically; claude-opus-5 rejects any
-    # non-default temperature outright with a 400.
+    # non-default temperature outright with a 400. The same real
+    # truncation risk applies to max_tokens here too: this pass's
+    # whole job is rewriting text that's already close to final
+    # length, so 700 was sized for Haiku, which doesn't think by
+    # default -- on a thinking model that budget can vanish into
+    # thinking tokens before any rewritten text comes out at all.
     if model == "claude-haiku-4-5-20251001":
         payload_dict["temperature"] = 0
+    else:
+        payload_dict["max_tokens"] = 8000
+        payload_dict["output_config"] = {"effort": "low"}
     payload = jsonlib.dumps(payload_dict).encode("utf-8")
     req = urllib.request.Request(
         "https://api.anthropic.com/v1/messages",

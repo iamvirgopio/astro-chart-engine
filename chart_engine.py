@@ -11,6 +11,7 @@ Uses Moshier semi-analytic mode (no external ephemeris data files needed,
 import swisseph as swe
 import math
 import os
+import httpx
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from timezonefinder import TimezoneFinder
@@ -657,7 +658,7 @@ def _check_grounding(text, key_terms, stylist_voice):
     return len(matched) >= 1
 
 
-def _blend_ingredients_into_answer(ingredients, task_instruction, question_context=None, api_key=None, sentence_range="2-5", max_tokens=300, allow_web_search=False, interpretive=False, stylist_voice=False, model="claude-haiku-4-5-20251001"):
+async def _blend_ingredients_into_answer(ingredients, task_instruction, question_context=None, api_key=None, sentence_range="2-5", max_tokens=300, allow_web_search=False, interpretive=False, stylist_voice=False, model="claude-haiku-4-5-20251001"):
     """
     THE single shared blending function for every question-answering
     surface in the app—vibe of day, the main reading engine, synastry
@@ -990,14 +991,25 @@ def _blend_ingredients_into_answer(ingredients, task_instruction, question_conte
         payload_dict["tools"] = [{"type": "web_search_20250305", "name": "web_search"}]
     payload = jsonlib.dumps(payload_dict).encode("utf-8")
 
-    def _make_one_call():
-        req = urllib.request.Request(
-            "https://api.anthropic.com/v1/messages",
-            data=payload,
-            headers={"Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01"},
-        )
-        with urllib.request.urlopen(req, timeout=30 if allow_web_search else 15) as resp:
-            body = jsonlib.loads(resp.read())
+    async def _make_one_call():
+        # httpx.AsyncClient, not urllib -- urllib.request.urlopen blocks
+        # the calling thread for its entire duration, and on a
+        # synchronous FastAPI endpoint, that thread comes from a shared,
+        # limited pool. A slow Opus call (thinking can push this to many
+        # seconds) sitting in that pool starves every other endpoint
+        # sharing it -- confirmed as the real, root cause of "the whole
+        # app feels laggy" reports, not a coincidence. Async I/O releases
+        # the thread while genuinely waiting on the network, which is
+        # the actual fix, not just a smaller version of the same
+        # problem.
+        async with httpx.AsyncClient(timeout=30 if allow_web_search else 15) as client:
+            resp = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                content=payload,
+                headers={"Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01"},
+            )
+            resp.raise_for_status()
+            body = resp.json()
         # With web search enabled, the response can contain multiple text
         # blocks interleaved (server_tool_use, web_search_tool_result,
         # text) rather than a single one—concatenating every text-type
@@ -1039,10 +1051,10 @@ def _blend_ingredients_into_answer(ingredients, task_instruction, question_conte
     def _is_grounded(text):
         return _check_grounding(text, key_terms, stylist_voice)
 
-    raw_text = _make_one_call()
+    raw_text = await _make_one_call()
     if not _is_grounded(raw_text):
         print(f"[blend] response didn't reference any real ingredient content, retrying once. First attempt: {raw_text[:200]}")
-        raw_text = _make_one_call()
+        raw_text = await _make_one_call()
     if not _is_grounded(raw_text):
         print(f"[blend] still ungrounded after retry, raising for caller to handle. Retry attempt: {raw_text[:200]}")
         # Deliberately unmistakable rather than a plain exception message
@@ -1066,10 +1078,10 @@ def _blend_ingredients_into_answer(ingredients, task_instruction, question_conte
     return raw_text.strip()
 
 
-def _blend_vibe_ingredients(ingredients, api_key=None):
+async def _blend_vibe_ingredients(ingredients, api_key=None):
     """Thin wrapper over the shared blending function—kept for the
     existing call site in generate_integrated_vibe_of_day."""
-    result = _blend_ingredients_into_answer(
+    result = await _blend_ingredients_into_answer(
         ingredients, task_instruction="advising someone how to approach today", api_key=api_key,
     )
     # This wrapper bypasses blend_answer entirely, so it needs its own
@@ -1126,7 +1138,7 @@ def _check_angle_transits(transiting_positions, angle_data):
     return best
 
 
-def generate_integrated_vibe_of_day(day_result, natal_positions, natal_houses,
+async def generate_integrated_vibe_of_day(day_result, natal_positions, natal_houses,
                                      retrogrades_today, eclipse_today, moon_phase_today,
                                      today_positions=None, angle_data=None, api_key=None):
     """
@@ -1197,7 +1209,7 @@ def generate_integrated_vibe_of_day(day_result, natal_positions, natal_houses,
         return result
 
     try:
-        result["message"] = _blend_vibe_ingredients(ingredients, api_key)
+        result["message"] = await _blend_vibe_ingredients(ingredients, api_key)
     except Exception as e:
         # Graceful fallback: real content, just not blended into one
         # voice—still accurate, still useful, just less seamless.
@@ -1284,7 +1296,7 @@ question isn't cleanly any of the four—score it low and let the app ask
 the user directly rather than guessing)."""
 
 
-def classify_question_live(question_text, api_key=None):
+async def classify_question_live(question_text, api_key=None):
     """
     Real classification call. Set ANTHROPIC_API_KEY in the environment
     (or pass api_key) before calling this in production.
@@ -1300,21 +1312,20 @@ def classify_question_live(question_text, api_key=None):
         "messages": [{"role": "user", "content": question_text}],
     }).encode()
 
-    req = urllib.request.Request(
-        "https://api.anthropic.com/v1/messages", data=body,
-        headers={"x-api-key": api_key, "anthropic-version": "2023-06-01",
-                 "content-type": "application/json"},
-    )
-
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            result = json.loads(resp.read())
-    except urllib.error.HTTPError as e:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                "https://api.anthropic.com/v1/messages", content=body,
+                headers={"x-api-key": api_key, "anthropic-version": "2023-06-01",
+                         "content-type": "application/json"},
+            )
+            resp.raise_for_status()
+            result = resp.json()
+    except httpx.HTTPStatusError as e:
         # Surface Anthropic's ACTUAL error message instead of a bare
         # "400 Bad Request"—this is what tells us if it's a bad key,
         # a bad model name, or something else entirely.
-        error_body = e.read().decode()
-        raise RuntimeError(f"Anthropic API returned {e.code}: {error_body}")
+        raise RuntimeError(f"Anthropic API returned {e.response.status_code}: {e.response.text}")
 
     raw_text = result["content"][0]["text"].strip()
     # Models sometimes wrap JSON in markdown fences even when told not to
@@ -1333,13 +1344,13 @@ def classify_question_live(question_text, api_key=None):
         raise RuntimeError(f"Couldn't parse classifier response as JSON. Raw text was: {raw_text!r}")
 
 
-def route_with_confidence(question_text, classify_fn=classify_question_live):
+async def route_with_confidence(question_text, classify_fn=classify_question_live):
     """
     The actual app-facing entry point. classify_fn is swappable so this
     same branching logic can be tested with a mock instead of a live call.
     Returns either a direct route or a clarify-screen instruction.
     """
-    result = classify_fn(question_text)
+    result = await classify_fn(question_text)
     if result["confidence"] >= CONFIDENCE_THRESHOLD:
         return {"action": "route_directly", "lens": result["lens"]}
     else:
@@ -1350,7 +1361,7 @@ def route_with_confidence(question_text, classify_fn=classify_question_live):
 
 
 # --- Full pipeline ----------------------------------------------------------
-def generate_integrated_question_reading(top_day, natal_positions, natal_houses, question_text, api_key=None):
+async def generate_integrated_question_reading(top_day, natal_positions, natal_houses, question_text, api_key=None):
     """
     Same real-content-plus-blending pattern as the integrated vibe of
     day, applied here to fix a real gap: the why/whats_off phrases were
@@ -1375,7 +1386,7 @@ def generate_integrated_question_reading(top_day, natal_positions, natal_houses,
         return result
 
     try:
-        result["message"] = _blend_ingredients_into_answer(
+        result["message"] = await _blend_ingredients_into_answer(
             ingredients,
             task_instruction=f"directly answering their specific question, referencing {base_reading['date']} naturally since they want to know when",
             question_context=question_text,
@@ -1391,7 +1402,7 @@ def generate_integrated_question_reading(top_day, natal_positions, natal_houses,
     return result
 
 
-def handle_question(question_text, natal_chart, lat, lon,
+async def handle_question(question_text, natal_chart, lat, lon,
                      start_year, start_month, start_day, num_days=30,
                      classify_fn=classify_question_live, house_system="placidus", api_key=None):
     """
@@ -1401,7 +1412,7 @@ def handle_question(question_text, natal_chart, lat, lon,
     confident, returns the clarify-screen instruction instead so the
     app can show the tappable options—never a guessed answer.
     """
-    routing = route_with_confidence(question_text, classify_fn)
+    routing = await route_with_confidence(question_text, classify_fn)
     if routing["action"] == "show_clarify":
         return routing
 
@@ -1412,7 +1423,7 @@ def handle_question(question_text, natal_chart, lat, lon,
         lat, lon, lens=routing["lens"], natal_houses=natal_houses,
     )
     top_day = results[0]
-    reading = generate_integrated_question_reading(top_day, natal_chart["positions"], natal_houses, question_text, api_key=api_key)
+    reading = await generate_integrated_question_reading(top_day, natal_chart["positions"], natal_houses, question_text, api_key=api_key)
     return {"action": "show_reading", "lens": routing["lens"],
             "question": question_text, "reading": reading}
 
@@ -1930,7 +1941,7 @@ def check_location_influence(lines, query_lat, query_lon, orb_degrees=6):
     return sorted(hits, key=lambda h: h["distance_deg"])
 
 
-def classify_open_question(question_text, valid_lenses, context_description, api_key=None):
+async def classify_open_question(question_text, valid_lenses, context_description, api_key=None):
     """
     General-purpose question classifier, reusing the same invisible-AI
     routing pattern as classify_question_live—just with a swappable
@@ -1950,24 +1961,24 @@ def classify_open_question(question_text, valid_lenses, context_description, api
         f"No markdown, no explanation, just the JSON object."
     )
 
-    import urllib.request
     payload = jsonlib.dumps({
         "model": "claude-haiku-4-5-20251001",
         "max_tokens": 100,
         "system": system_prompt,
         "messages": [{"role": "user", "content": question_text}],
     }).encode("utf-8")
-    req = urllib.request.Request(
-        "https://api.anthropic.com/v1/messages",
-        data=payload,
-        headers={
-            "Content-Type": "application/json",
-            "x-api-key": key,
-            "anthropic-version": "2023-06-01",
-        },
-    )
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        body = jsonlib.loads(resp.read())
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.post(
+            "https://api.anthropic.com/v1/messages",
+            content=payload,
+            headers={
+                "Content-Type": "application/json",
+                "x-api-key": key,
+                "anthropic-version": "2023-06-01",
+            },
+        )
+        resp.raise_for_status()
+        body = resp.json()
     text = body["content"][0]["text"].strip()
     text = re.sub(r"^```(json)?|```$", "", text.strip(), flags=re.MULTILINE).strip()
     result = jsonlib.loads(text)
@@ -1976,7 +1987,7 @@ def classify_open_question(question_text, valid_lenses, context_description, api
     return result
 
 
-def classify_question_multi_lens(question_text, valid_lenses, context_description, target_count=3, api_key=None):
+async def classify_question_multi_lens(question_text, valid_lenses, context_description, target_count=3, api_key=None):
     """A genuinely separate function from classify_open_question, not a
     parameter added to it—that function is single-choice by design
     (one lens, used correctly by synastry and location routing today),
@@ -2000,24 +2011,24 @@ def classify_question_multi_lens(question_text, valid_lenses, context_descriptio
         f"No markdown, no explanation, just the JSON object."
     )
 
-    import urllib.request
     payload = jsonlib.dumps({
         "model": "claude-haiku-4-5-20251001",
         "max_tokens": 150,
         "system": system_prompt,
         "messages": [{"role": "user", "content": question_text}],
     }).encode("utf-8")
-    req = urllib.request.Request(
-        "https://api.anthropic.com/v1/messages",
-        data=payload,
-        headers={
-            "Content-Type": "application/json",
-            "x-api-key": key,
-            "anthropic-version": "2023-06-01",
-        },
-    )
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        body = jsonlib.loads(resp.read())
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.post(
+            "https://api.anthropic.com/v1/messages",
+            content=payload,
+            headers={
+                "Content-Type": "application/json",
+                "x-api-key": key,
+                "anthropic-version": "2023-06-01",
+            },
+        )
+        resp.raise_for_status()
+        body = resp.json()
     text = body["content"][0]["text"].strip()
     text = re.sub(r"^```(json)?|```$", "", text.strip(), flags=re.MULTILINE).strip()
     result = jsonlib.loads(text)
@@ -3416,7 +3427,7 @@ def recommend_locations(jd_ut, theme_planets, theme_lines=None, top_n=5, orb_deg
 # calculation needed here, just cross-referencing chart_a's positions
 # against chart_b's using the same find_aspect() logic used for transits.
 
-def _cut_commentary(raw_text, api_key=None, model="claude-haiku-4-5-20251001"):
+async def _cut_commentary(raw_text, api_key=None, model="claude-haiku-4-5-20251001"):
     """
     Second pass, one narrow job only: cut commentary, keep facts. Not
     a rewording of the generation prompt again—a genuinely different
@@ -3538,14 +3549,15 @@ def _cut_commentary(raw_text, api_key=None, model="claude-haiku-4-5-20251001"):
         # back elsewhere over a real flatness concern.
         payload_dict["max_tokens"] = 8000
     payload = jsonlib.dumps(payload_dict).encode("utf-8")
-    req = urllib.request.Request(
-        "https://api.anthropic.com/v1/messages",
-        data=payload,
-        headers={"Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01"},
-    )
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            body = jsonlib.loads(resp.read())
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                content=payload,
+                headers={"Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01"},
+            )
+            resp.raise_for_status()
+            body = resp.json()
         edited = "".join(
             block.get("text", "") for block in body.get("content", []) if block.get("type") == "text"
         ).strip()
@@ -3576,7 +3588,7 @@ def _normalize_dashes(text):
     return text
 
 
-def blend_answer(ingredients, question_text, api_key=None, detailed=False, allow_web_search=False, interpretive=False, sentence_range_override=None, stylist_voice=False):
+async def blend_answer(ingredients, question_text, api_key=None, detailed=False, allow_web_search=False, interpretive=False, sentence_range_override=None, stylist_voice=False):
     """
     Generic blending entry point for surfaces where the real content
     library lives on the FRONTEND (synastry's 78-pair library, location's
@@ -3669,7 +3681,7 @@ def blend_answer(ingredients, question_text, api_key=None, detailed=False, allow
         # being cut off mid-word, the same failure this was already
         # tuned to avoid once before.
         kwargs["max_tokens"] = max(kwargs.get("max_tokens", 300), high * 75 + 300)
-    result = _blend_ingredients_into_answer(
+    result = await _blend_ingredients_into_answer(
         ingredients,
         task_instruction="directly answering their specific question",
         question_context=question_text,
@@ -3724,7 +3736,7 @@ def blend_answer(ingredients, question_text, api_key=None, detailed=False, allow
         # Opus's full capability -- Haiku ran this exact task
         # perfectly reasonably before stylist_voice existed at all.
         pre_cleanup_result = result
-        result = _cut_commentary(result, api_key=api_key)
+        result = await _cut_commentary(result, api_key=api_key)
         # The actual fix for the gap _check_grounding's own docstring
         # describes: re-check the CUT text, not just trust that a
         # rewrite pass which was already told to preserve sign names

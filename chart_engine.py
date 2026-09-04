@@ -897,16 +897,21 @@ def _blend_ingredients_into_answer(ingredients, task_instruction, question_conte
         # floor here regardless of the sentence-range math above,
         # since that math was never designed with thinking in mind.
         #
-        # effort: "low" was set here too, on the reasoning that a
-        # short creative description doesn't need deep reasoning and
-        # lower effort tests well on Opus 5 generally -- removed after
-        # a direct report that the result read as genuinely flat,
-        # combined with generation still being slow even at "low."
-        # If low effort wasn't meaningfully buying speed, it may have
-        # just been costing creative quality for nothing. This is a
-        # real hypothesis, not a confirmed cause -- worth testing
-        # against default effort, not asserted as the definite fix.
+        # effort was tested at both settings, neither confirmed as
+        # correct: "low" was tried first for speed, removed after a
+        # report the writing felt flat since default effort might
+        # write with more life for a creative task like this. But
+        # that swap was never actually confirmed to help -- no clean
+        # read on quality either way -- while a real, repeated report
+        # confirmed generation was still slow at default effort too.
+        # Restored to "low" on that asymmetry: a confirmed cost
+        # (slowness) against an unconfirmed, never-observed benefit
+        # isn't a trade worth keeping. If flatness turns out to be a
+        # genuinely separate issue from effort level, that needs its
+        # own real signal to act on, not another guess at this same
+        # parameter.
         payload_dict["max_tokens"] = max(max_tokens, 8000)
+        payload_dict["output_config"] = {"effort": "low"}
     if allow_web_search:
         payload_dict["tools"] = [{"type": "web_search_20250305", "name": "web_search"}]
     payload = jsonlib.dumps(payload_dict).encode("utf-8")
@@ -960,7 +965,22 @@ def _blend_ingredients_into_answer(ingredients, task_instruction, question_conte
     def _is_grounded(text):
         if not key_terms:
             return True  # nothing planet-specific was given to check against—don't force a false failure
-        return any(term in text for term in key_terms)
+        matched = [term for term in key_terms if term in text]
+        if stylist_voice:
+            # Stylist_voice's own prompt instruction asks for several
+            # placements woven together (at least 2-3), not just one --
+            # a real, reported case ("defaulted back to Venus again")
+            # showed that wording alone wasn't reliably enough to
+            # guarantee this every time, the same lesson as everything
+            # else tonight that only held once it got real code-level
+            # enforcement instead of staying a prompt-only request.
+            # Requiring at least 2 distinct planet names here (never
+            # more than however many were actually offered, so this
+            # can't demand something impossible) makes the retry
+            # mechanism actually catch a genuinely single-placement
+            # response, not just a completely ungrounded one.
+            return len(matched) >= min(2, len(key_terms))
+        return len(matched) >= 1
 
     raw_text = _make_one_call()
     if not _is_grounded(raw_text):

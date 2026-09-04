@@ -754,6 +754,19 @@ def _blend_ingredients_into_answer(ingredients, task_instruction, question_conte
             "each time rather than reusing the example items verbatim. Two different people "
             "asking about the same occasion with the same chart should still be able to get "
             "two different specific outfits, both true to the same underlying vibe.\n\n"
+            "If body fit preferences are given below, let them genuinely constrain the "
+            "specific garment you invent, not just its color or vibe. Translate the stated "
+            "preference into an actual fit decision, the way a real stylist would: a fuller "
+            "bust calls for real structural support, not a flimsy strapless or tube style "
+            "without it; a preference for extra calf room in boots means a wider-shaft boot, "
+            "an ankle boot, or boot-cut pants instead of a tightly fitted knee-high style; "
+            "comfort over heel height means flats or a low block heel, not a stiletto. Apply "
+            "that same kind of reasoning to every preference listed, including ones not named "
+            "here specifically\u2014the goal is a piece that actually fits and flatters, not "
+            "one that merely repeats the preference back as a label. Never mention a fit "
+            "preference in the output itself, and never explain or justify a choice because "
+            "of it\u2014just make the correct, well-fitting choice silently, the same way a "
+            "good stylist would without narrating their own reasoning to a client.\n\n"
             if stylist_voice else
             "Voice: say what this means, plainly and directly—the way you'd tell a friend in "
             "person, not write it up as a report. Fold the real fact into the sentence that "
@@ -883,15 +896,17 @@ def _blend_ingredients_into_answer(ingredients, task_instruction, question_conte
         # output truncated mid-word, mid-sentence. Given a generous
         # floor here regardless of the sentence-range math above,
         # since that math was never designed with thinking in mind.
-        # Effort is also set to "low" -- lower effort is confirmed
-        # "genuinely stronger on Opus 5 than on prior models" per
-        # Anthropic's own effort guidance, and a short creative outfit
-        # description doesn't need deep multi-step reasoning; lower
-        # effort means less of this budget is spent thinking in the
-        # first place, which both cuts cost and further reduces the
-        # chance of this same truncation happening again.
+        #
+        # effort: "low" was set here too, on the reasoning that a
+        # short creative description doesn't need deep reasoning and
+        # lower effort tests well on Opus 5 generally -- removed after
+        # a direct report that the result read as genuinely flat,
+        # combined with generation still being slow even at "low."
+        # If low effort wasn't meaningfully buying speed, it may have
+        # just been costing creative quality for nothing. This is a
+        # real hypothesis, not a confirmed cause -- worth testing
+        # against default effort, not asserted as the definite fix.
         payload_dict["max_tokens"] = max(max_tokens, 8000)
-        payload_dict["output_config"] = {"effort": "low"}
     if allow_web_search:
         payload_dict["tools"] = [{"type": "web_search_20250305", "name": "web_search"}]
     payload = jsonlib.dumps(payload_dict).encode("utf-8")
@@ -3417,8 +3432,14 @@ def _cut_commentary(raw_text, api_key=None, model="claude-haiku-4-5-20251001"):
     if model == "claude-haiku-4-5-20251001":
         payload_dict["temperature"] = 0
     else:
+        # No effort override here either, matching the main
+        # generation call's own reversal -- this pass currently only
+        # ever runs on Haiku in practice (moved back after two
+        # sequential Opus calls compounded into real, reported
+        # latency), but if a thinking model is ever passed here again,
+        # it shouldn't inherit a "low" effort setting that was walked
+        # back elsewhere over a real flatness concern.
         payload_dict["max_tokens"] = 8000
-        payload_dict["output_config"] = {"effort": "low"}
     payload = jsonlib.dumps(payload_dict).encode("utf-8")
     req = urllib.request.Request(
         "https://api.anthropic.com/v1/messages",
@@ -3594,10 +3615,18 @@ def blend_answer(ingredients, question_text, api_key=None, detailed=False, allow
         # reflexively -- the lean voice text stays as-is, since it's
         # independently responsible for the two real improvements
         # above and this pass has no bearing on either of those.
-        result = _cut_commentary(
-            result, api_key=api_key,
-            **({"model": "claude-opus-5"} if stylist_voice else {}),
-        )
+        #
+        # Kept on Haiku even for stylist_voice, unlike the main
+        # generation call -- upgrading this pass to Opus too was a
+        # real mistake, caught after a direct report that generation
+        # was taking too long: two sequential Opus calls, each with
+        # its own thinking overhead, compounds into real, noticeable
+        # latency. This pass's job is narrow and mechanical (cut
+        # specific patterns from text that already exists), not
+        # creative generation, so there's no clear reason it needs
+        # Opus's full capability -- Haiku ran this exact task
+        # perfectly reasonably before stylist_voice existed at all.
+        result = _cut_commentary(result, api_key=api_key)
     # The model's own dash style is independent of whatever formatting
     # the prompt itself uses—sweeping every " -- " out of this file's
     # own text doesn't change what a live generation chooses to write.

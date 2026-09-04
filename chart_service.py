@@ -137,6 +137,12 @@ class ProgressionsRequest(BaseModel):
     target_year: int | None = None
     target_month: int | None = None
     target_day: int | None = None
+    # Both optional, both required together for progressed angles to be
+    # included at all -- see compute_progressed_positions's own
+    # docstring for why this needs the real birthplace coordinates
+    # rather than being derivable from julian_day_ut alone.
+    lat: float | None = Field(default=None, ge=-90, le=90)
+    lon: float | None = Field(default=None, ge=-180, le=180)
 
 
 @app.post("/progressions")
@@ -149,7 +155,7 @@ def get_progressions(req: ProgressionsRequest):
             from datetime import date
             today = date.today()
             target_jd_ut = ce.julian_day_utc(today.year, today.month, today.day, 12, 0, 0)
-        result = ce.compute_progressed_positions(birth_jd_ut, target_jd_ut)
+        result = ce.compute_progressed_positions(birth_jd_ut, target_jd_ut, lat=req.lat, lon=req.lon)
     except KeyError:
         raise HTTPException(status_code=400, detail="natal_chart is missing julian_day_ut—pass the full computed chart, not just positions")
     except Exception as e:

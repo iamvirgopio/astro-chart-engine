@@ -669,6 +669,64 @@ async def get_blended_answer(req: BlendAnswerRequest):
     return {"message": message}
 
 
+class StyleRecommendationRequest(BaseModel):
+    natal_chart: dict  # the full chart object, not just positions -- compute_style_profile needs houses_and_angles too
+    occasion_text: str
+    # Both optional, both required together for real weather to be
+    # used at all -- an unknown-time chart, a guest who hasn't granted
+    # location, or a weather-fetch failure all still produce a real
+    # recommendation, just from occasion-based inference alone.
+    lat: float | None = Field(default=None, ge=-90, le=90)
+    lon: float | None = Field(default=None, ge=-180, le=180)
+    style_mode: str | None = None  # None/omitted means gender-neutral, matching bodyPreferences.ts's own null-means-unset convention
+    style_mode_custom_text: str | None = None
+    body_preferences_text: str | None = None
+
+
+@app.post("/style-recommendation")
+async def get_style_recommendation(req: StyleRecommendationRequest):
+    """
+    Star Stylist's rebuilt endpoint: computes the real chart-derived
+    style profile, fetches real weather when location is available,
+    classifies what the occasion practically implies (its own fast
+    call, run before generation rather than folded into it), then
+    generates the actual recommendation from all of it as clean,
+    structured facts.
+    """
+    try:
+        style_profile = ce.compute_style_profile(req.natal_chart)
+
+        weather = None
+        if req.lat is not None and req.lon is not None:
+            openweather_key = os.environ.get("OPENWEATHER_API_KEY")
+            weather = await ce.fetch_current_weather(req.lat, req.lon, openweather_key)
+
+        try:
+            occasion_classification = await ce.classify_occasion_context(req.occasion_text, weather=weather)
+        except Exception as e:
+            # Same graceful-degradation principle as weather itself:
+            # a classification hiccup should produce a real, slightly
+            # less-tailored recommendation, not a failed request. The
+            # actual generation call is robust to plain, neutral
+            # defaults here since nothing about it requires a genuine
+            # classification to have succeeded.
+            print(f"[style-recommendation] occasion classification failed, using neutral defaults: {type(e).__name__}: {e}")
+            occasion_classification = {
+                "activity_level": "medium", "formality": "casual",
+                "implied_temp_lean": "neutral", "mismatch_flag": False, "mismatch_note": None,
+            }
+
+        message = await ce.generate_style_recommendation(
+            style_profile=style_profile, occasion_text=req.occasion_text,
+            occasion_classification=occasion_classification, weather=weather,
+            style_mode=req.style_mode, style_mode_custom_text=req.style_mode_custom_text,
+            body_preferences_text=req.body_preferences_text, api_key=None,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"message": message}
+
+
 @app.post("/classify-question")
 async def classify_question_endpoint(req: ClassifyQuestionRequest):
     """General-purpose free-text classifier, reused for synastry and

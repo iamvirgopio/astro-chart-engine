@@ -2422,13 +2422,116 @@ STYLE_RECOMMENDATION_SYSTEM_PROMPT = (
     "choice (built-in structure in a top's own straps or lining, a wider boot shaft, a lower "
     "heel), never into a foundation garment underneath\u2014that reasoning is never a reason to "
     "mention an undergarment. Invent a genuinely different specific solution each time a "
-    "preference is set, not the same fixed answer every time."
+    "preference is set, not the same fixed answer every time.\n\n"
+    "If real_wardrobe_items_to_use is given, those specific categories already have a real, "
+    "logged item to build around\u2014reference it directly and specifically (\"the [color] "
+    "[fabric] [category] you already have\"), never invent a different item for a category "
+    "that's already been given a real one. Every other category not covered there still gets a "
+    "genuinely invented, specific item the same way as always. A recommendation can freely mix "
+    "real logged pieces with invented ones in the same outfit\u2014that's the normal case, not an "
+    "inconsistency to smooth over or apologize for."
 )
+
+
+async def classify_wardrobe_match(wardrobe_text, occasion_text, occasion_classification, weather=None, api_key=None):
+    """
+    Star Stylist's wardrobe integration: rather than handing every
+    logged closet item straight to the generation call and hoping it
+    reasons through which ones genuinely fit today (the same
+    "trust the model to pick from a list unassisted" pattern that
+    caused real problems earlier in this session), a small, fast,
+    separate call decides which logged item -- if any -- genuinely
+    fits each category for today's specific occasion and weather,
+    the same architecture already proven by classify_occasion_context.
+
+    wardrobe_text: output of wardrobeItemsToText() on the frontend, or
+    None if the person hasn't logged anything -- this function should
+    never be called at all in that case; that's a fast, free
+    generic-mode decision the caller makes before ever reaching here.
+
+    Returns {"matched_items": {category: item_id or None, ...},
+    "missing_categories": [category, ...]} -- missing_categories names
+    categories genuinely needed for this occasion/weather that either
+    have nothing logged or nothing logged that actually fits, which
+    the generation layer treats as permission to invent generically
+    for just that category while still using real logged items
+    everywhere a genuine match exists. Never raises on a parsing
+    failure -- an empty match (full generic mode) is always a safe,
+    reasonable fallback for a feature that's optional by nature.
+    """
+    import os, json as jsonlib, re
+    key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+    if not key:
+        raise RuntimeError("No Anthropic API key configured")
+
+    weather_line = "No weather data available." if not weather else (
+        f"{weather.get('temp_f')}\u00b0F, feels like {weather.get('feels_like_f')}\u00b0F, "
+        f"{weather.get('description') or 'no description'}"
+    )
+    classification_line = (
+        f"Activity level: {occasion_classification.get('activity_level')}. "
+        f"Formality: {occasion_classification.get('formality')}. "
+        f"Temperature lean: {occasion_classification.get('implied_temp_lean')}."
+    ) if occasion_classification else "No classification available."
+
+    system_prompt = (
+        "You match a person's logged wardrobe items to what today's occasion and weather "
+        "genuinely call for. Each logged item is listed with an [id:...] tag\u2014use that exact "
+        "id string to refer to it. For each of these categories\u2014top, dress, bottom, outerwear, "
+        "shoes, bag, accessory\u2014decide whether ANY single logged item in that category is a "
+        "genuinely good fit for today, not just technically the right category. A heavy wool coat "
+        "logged as outerwear is not a match for a hot, humid errand day, even though it's the only "
+        "outerwear logged.\n\n"
+        "Return ONLY this JSON object, no markdown, no explanation:\n"
+        '{"matched_items": {"top": "<id or null>", "dress": "<id or null>", "bottom": "<id or null>", '
+        '"outerwear": "<id or null>", "shoes": "<id or null>", "bag": "<id or null>", '
+        '"accessory": "<id or null>"}, "missing_categories": ["<category>", ...]}\n\n'
+        "missing_categories lists only categories that are genuinely needed for today (e.g. "
+        "outerwear isn't \"needed\" on a hot day even if nothing is logged for it) but have no "
+        "logged item that actually fits\u2014this is what tells the next step it's fine to invent "
+        "something generic for just that category, not a request to fill every category that "
+        "simply has nothing logged."
+    )
+
+    payload = jsonlib.dumps({
+        "model": "claude-haiku-4-5-20251001",
+        "max_tokens": 300,
+        "system": system_prompt,
+        "messages": [{"role": "user", "content": (
+            f"Occasion: {occasion_text}\nWeather: {weather_line}\nClassification: {classification_line}\n\n"
+            f"Logged wardrobe items:\n{wardrobe_text}"
+        )}],
+    }).encode("utf-8")
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                content=payload,
+                headers={"Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01"},
+            )
+            resp.raise_for_status()
+            body = resp.json()
+        text = body["content"][0]["text"].strip()
+        text = re.sub(r"^```(json)?|```$", "", text.strip(), flags=re.MULTILINE).strip()
+        result = jsonlib.loads(text)
+        valid_categories = {"top", "dress", "bottom", "outerwear", "shoes", "bag", "accessory"}
+        matched = result.get("matched_items", {})
+        # Defensive normalization, same principle as every other
+        # classifier in this file: never trust the shape came back
+        # exactly as asked, even though the prompt states it plainly.
+        matched = {k: v for k, v in matched.items() if k in valid_categories and v}
+        missing = [c for c in result.get("missing_categories", []) if c in valid_categories]
+        return {"matched_items": matched, "missing_categories": missing}
+    except Exception as e:
+        print(f"[wardrobe-match] classification failed, falling back to fully generic mode: {type(e).__name__}: {e}")
+        return {"matched_items": {}, "missing_categories": []}
 
 
 async def generate_style_recommendation(
     style_profile, occasion_text, occasion_classification, weather=None,
-    style_mode=None, style_mode_custom_text=None, body_preferences_text=None, api_key=None,
+    style_mode=None, style_mode_custom_text=None, body_preferences_text=None,
+    wardrobe_items=None, wardrobe_match=None, api_key=None,
 ):
     """
     Star Stylist's rebuilt generation call: takes the structured facts
@@ -2440,6 +2543,15 @@ async def generate_style_recommendation(
     that function's whole shape (a bullet list of pre-written vibe
     strings) is the architecture this rebuild replaces, not a variant
     to keep threading new features through.
+
+    wardrobe_items/wardrobe_match (both optional, both null for anyone
+    who hasn't logged a wardrobe at all): wardrobe_items is the raw
+    list of logged item dicts (id, category, color, fabric,
+    description); wardrobe_match is classify_wardrobe_match's own
+    {category: item_id} result. This function cross-references the two
+    itself rather than trusting a pre-joined structure from the
+    caller, so a stale or mismatched id from wardrobe_match can never
+    silently reference an item that doesn't actually exist.
     """
     import json as jsonlib, re
     key = api_key or os.environ.get("ANTHROPIC_API_KEY")
@@ -2463,6 +2575,16 @@ async def generate_style_recommendation(
         # else tonight that only held once it moved from "hopefully
         # notices" to an explicit, separately-flagged instruction.
         user_facts["real_mismatch_to_address_briefly"] = occasion_classification["mismatch_note"]
+
+    if wardrobe_items and wardrobe_match:
+        items_by_id = {item["id"]: item for item in wardrobe_items}
+        real_items = {}
+        for category, item_id in wardrobe_match.items():
+            item = items_by_id.get(item_id)
+            if item:
+                real_items[category] = {k: v for k, v in item.items() if k != "id"}
+        if real_items:
+            user_facts["real_wardrobe_items_to_use"] = real_items
 
     payload = jsonlib.dumps({
         "model": "claude-opus-5",

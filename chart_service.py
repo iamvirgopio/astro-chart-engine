@@ -681,6 +681,13 @@ class StyleRecommendationRequest(BaseModel):
     style_mode: str | None = None  # None/omitted means gender-neutral, matching bodyPreferences.ts's own null-means-unset convention
     style_mode_custom_text: str | None = None
     body_preferences_text: str | None = None
+    # Both optional, both empty/None for anyone who hasn't logged a
+    # wardrobe at all -- wardrobe_text is wardrobeItemsToText()'s own
+    # output from the frontend (already formatted with [id:...] tags),
+    # wardrobe_items is the raw list generate_style_recommendation
+    # cross-references matched ids against.
+    wardrobe_text: str | None = None
+    wardrobe_items: list[dict] | None = None
 
 
 @app.post("/style-recommendation")
@@ -689,9 +696,10 @@ async def get_style_recommendation(req: StyleRecommendationRequest):
     Star Stylist's rebuilt endpoint: computes the real chart-derived
     style profile, fetches real weather when location is available,
     classifies what the occasion practically implies (its own fast
-    call, run before generation rather than folded into it), then
-    generates the actual recommendation from all of it as clean,
-    structured facts.
+    call, run before generation rather than folded into it), matches
+    any logged wardrobe items that genuinely fit (a third fast call,
+    skipped entirely when nothing's been logged), then generates the
+    actual recommendation from all of it as clean, structured facts.
     """
     try:
         style_profile = ce.compute_style_profile(req.natal_chart)
@@ -716,11 +724,23 @@ async def get_style_recommendation(req: StyleRecommendationRequest):
                 "implied_temp_lean": "neutral", "mismatch_flag": False, "mismatch_note": None,
             }
 
+        # Skipped entirely, not even attempted, when nothing's logged
+        # -- an empty wardrobe costs nothing extra rather than making
+        # a pointless classification call over an empty list.
+        wardrobe_match = None
+        if req.wardrobe_text and req.wardrobe_items:
+            wardrobe_match = await ce.classify_wardrobe_match(
+                req.wardrobe_text, req.occasion_text, occasion_classification, weather=weather,
+            )
+
         message = await ce.generate_style_recommendation(
             style_profile=style_profile, occasion_text=req.occasion_text,
             occasion_classification=occasion_classification, weather=weather,
             style_mode=req.style_mode, style_mode_custom_text=req.style_mode_custom_text,
-            body_preferences_text=req.body_preferences_text, api_key=None,
+            body_preferences_text=req.body_preferences_text,
+            wardrobe_items=req.wardrobe_items,
+            wardrobe_match=wardrobe_match["matched_items"] if wardrobe_match else None,
+            api_key=None,
         )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

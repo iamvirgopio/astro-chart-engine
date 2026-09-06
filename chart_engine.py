@@ -1110,14 +1110,27 @@ async def _blend_ingredients_into_answer(ingredients, task_instruction, question
             "operates: audit your delivery, tighten your processes, cut what doesn't serve the "
             "core offer\" should never have that colon at all\u2014rewrite it as a real sentence "
             "instead (\"...operates, so audit your delivery, tighten your processes, and cut "
-            "what doesn't serve the core offer\").\n\n"
+            "what doesn't serve the core offer\"). A real, reported failure of a different "
+            "kind: some form of the word \"land\" (\"isn't landing yet,\" \"didn't land "
+            "clearly,\" \"land somewhere\") turned up repeatedly across separate readings, as "
+            "the automatic default word for describing a thought, feeling, or message settling "
+            "into clarity. Nothing about this rule is specific to that one word\u2014it's a real "
+            "instance of the same underlying problem as reaching for the same color or the same "
+            "closing phrase every time: whatever image or word choice comes to mind first for "
+            "this general idea, treat that as a reason to reach for something else, genuinely "
+            "thought through for this specific reading rather than recalled out of habit.\n\n"
             if interpretive else
-            "Voice: say what needs to be said. Nothing more. Every sentence states real, "
+            "Voice: this is one specific person's own voice, not a generic assistant's—"
+            "confident and direct in a way that never hedges or qualifies itself. Say what "
+            "needs to be said. Nothing more. Every sentence states real, "
             "concrete facts—an item, a color, a fit, a function. Before adding anything past "
             "those facts, ask one question: is this a NEW CONCRETE FACT, or is it COMMENTARY on "
             "how the thing reads, feels, suggests, or what story it tells? Facts stay. Commentary "
-            "gets cut, always, no exceptions for a line that sounds nice. Warmth comes from being "
-            "direct and specific, not from describing effects. Don't mince words.\n\n"
+            "gets cut, always, no exceptions for a line that sounds nice. Real warmth and a "
+            "little real personality come through in HOW a fact gets said, not by adding "
+            "commentary on top of it—real contractions, plain connectors (\"and,\" \"so,\" "
+            "\"but\"), never stiff transitional phrasing (\"furthermore,\" \"it is worth "
+            "noting\"). Don't mince words.\n\n"
             "Write it as connected prose, never a labeled inventory. Never use a category header "
             "like 'Hair:' or 'Outfit:' as a structure, and never lay it out as one isolated, "
             "clipped sentence per item, each one starting fresh with no connection to the last—"
@@ -1347,14 +1360,9 @@ async def _blend_ingredients_into_answer(ingredients, task_instruction, question
         return bool(_colon_re.search(r'(?<!\d):(?!\d)', text))
 
     raw_text = await _make_one_call()
-    retried = False
-    if not _is_grounded(raw_text) or _has_bad_colon(raw_text):
-        if not _is_grounded(raw_text):
-            print(f"[blend] response didn't reference any real ingredient content, retrying once. First attempt: {raw_text[:200]}")
-        else:
-            print(f"[blend] response used a colon the voice rule disallows, retrying once. First attempt: {raw_text[:200]}")
+    if not _is_grounded(raw_text):
+        print(f"[blend] response didn't reference any real ingredient content, retrying once. First attempt: {raw_text[:200]}")
         raw_text = await _make_one_call()
-        retried = True
     if not _is_grounded(raw_text):
         print(f"[blend] still ungrounded after retry, raising for caller to handle. Retry attempt: {raw_text[:200]}")
         # Deliberately unmistakable rather than a plain exception message
@@ -1365,14 +1373,30 @@ async def _blend_ingredients_into_answer(ingredients, task_instruction, question
         # that the grounding check is correctly catching a repeatedly-
         # ungrounded response rather than letting it through unchanged.
         raise RuntimeError("GROUNDING_CHECK_FAILED_TWICE: " + raw_text[:300])
-    if retried and _has_bad_colon(raw_text):
+
+    # Two retries here, not one -- a real, reported case of a colon
+    # surviving a single retry, traced to a genuine, identifiable
+    # cause rather than plain model randomness: the ingredient text
+    # itself, built on the frontend, used a colon as its own label/
+    # meaning separator ("Card Name: meaning text") in nearly every
+    # feature across the app, every single call, giving the model a
+    # colon-shaped pattern in its own input to plausibly mirror right
+    # before being told not to use one. That separator has been
+    # changed to a period at every call site as the real, primary fix.
+    # This extra retry budget is the backup for whatever the input fix
+    # doesn't fully catch, not the first line of defense.
+    for _ in range(2):
+        if not _has_bad_colon(raw_text):
+            break
+        print(f"[blend] response used a colon the voice rule disallows, retrying. Attempt: {raw_text[:200]}")
+        raw_text = await _make_one_call()
+    if _has_bad_colon(raw_text):
         # Deliberately not a hard failure the way grounding is—a
-        # remaining colon after one genuine retry is a real, minor
+        # colon surviving three real attempts is a genuine, minor
         # imperfection, not a reason to withhold an otherwise good,
-        # correctly-grounded reading entirely. Logged so this is
-        # actually visible and trackable rather than silently
-        # tolerated forever.
-        print(f"[blend] colon still present after retry, accepting anyway: {raw_text[:200]}")
+        # correctly-grounded reading entirely. Logged so this stays
+        # visible and trackable rather than silently tolerated.
+        print(f"[blend] colon still present after two retries, accepting anyway: {raw_text[:200]}")
 
     # The regex-based AI-tell filter that used to live here—stripping
     # specific banned words and phrases after the fact—is gone.

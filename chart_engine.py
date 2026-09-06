@@ -2457,7 +2457,14 @@ STYLE_RECOMMENDATION_SYSTEM_PROMPT = (
     "that's already been given a real one. Every other category not covered there still gets a "
     "genuinely invented, specific item the same way as always. A recommendation can freely mix "
     "real logged pieces with invented ones in the same outfit\u2014that's the normal case, not an "
-    "inconsistency to smooth over or apologize for."
+    "inconsistency to smooth over or apologize for.\n\n"
+    "If wardrobe_missing_categories is given, that means a category was checked against the "
+    "logged closet and nothing in it genuinely fit today\u2014not that nothing was logged at all. "
+    "Say so plainly and specifically: name what's missing and suggest a real, specific type of "
+    "item worth getting, in the exact same direct, undecorated voice as the rest of the reading. "
+    "Never apologize for the gap or hedge around it, and never quietly invent a placeholder item "
+    "that pretends to be a real logged piece when it isn't\u2014it still gets a genuinely invented "
+    "item for today, the suggestion to acquire something is in addition to that, not instead of it."
 )
 
 
@@ -2559,7 +2566,7 @@ async def classify_wardrobe_match(wardrobe_text, occasion_text, occasion_classif
 async def generate_style_recommendation(
     style_profile, occasion_text, occasion_classification, weather=None,
     style_mode=None, style_mode_custom_text=None, body_preferences_text=None,
-    wardrobe_items=None, wardrobe_match=None, api_key=None,
+    wardrobe_items=None, wardrobe_match=None, wardrobe_missing_categories=None, api_key=None,
 ):
     """
     Star Stylist's rebuilt generation call: takes the structured facts
@@ -2580,6 +2587,12 @@ async def generate_style_recommendation(
     itself rather than trusting a pre-joined structure from the
     caller, so a stale or mismatched id from wardrobe_match can never
     silently reference an item that doesn't actually exist.
+
+    wardrobe_missing_categories: classify_wardrobe_match's own list of
+    categories that were genuinely checked and had nothing suitable
+    logged for today specifically -- distinct from a category simply
+    never having anything logged in it at all, which is the normal,
+    unremarkable case and not something this reading comments on.
     """
     import json as jsonlib, re
     key = api_key or os.environ.get("ANTHROPIC_API_KEY")
@@ -2603,6 +2616,8 @@ async def generate_style_recommendation(
         # else tonight that only held once it moved from "hopefully
         # notices" to an explicit, separately-flagged instruction.
         user_facts["real_mismatch_to_address_briefly"] = occasion_classification["mismatch_note"]
+    if wardrobe_missing_categories:
+        user_facts["wardrobe_missing_categories"] = wardrobe_missing_categories
 
     if wardrobe_items and wardrobe_match:
         items_by_id = {item["id"]: item for item in wardrobe_items}
@@ -2663,6 +2678,124 @@ async def generate_style_recommendation(
     if not _is_grounded(cleaned):
         cleaned = raw_text
     return _normalize_dashes(cleaned)
+
+
+# Star Stylist's system prompt is deliberately silent about WHY a
+# placement means what it means -- that's correct for a daily,
+# decided-not-suggested outfit call. This is a genuinely different
+# use case: a one-time, standalone read on someone's own natural
+# aesthetic tendencies, in the same self-understanding spirit as the
+# rest of this app's readings. Here, explaining the real reasoning
+# behind an observation IS the point, not something to avoid.
+STYLE_PROFILE_SYSTEM_PROMPT = (
+    "You are helping someone understand their own natural aesthetic language, based on their "
+    "real chart placements\u2014not a daily outfit call, a genuine, standalone read on what "
+    "colors, silhouettes, textures, and overall energy they're naturally drawn to, and why.\n\n"
+    "Address them directly as \"you\" throughout. Name the real placement each observation is "
+    "grounded in\u2014their Ascendant, Venus, Moon, Mars, the houses given, their dominant element, "
+    "their dominant modality\u2014and here, unlike a daily outfit reading, explain the real "
+    "reasoning behind each observation; that's the actual value of this reading, not something to "
+    "cut.\n\n"
+    "How the chart actually shapes aesthetic language, as real reasoning to draw from:\n"
+    "- Ascendant and Venus together set the default aesthetic language: overall silhouette and "
+    "color sensibility.\n"
+    "- Moon shapes comfort instincts: fabric weight, texture, what actually feels safe to wear.\n"
+    "- Mars shapes boldness: how much of a statement versus how restrained someone naturally "
+    "leans.\n"
+    "- The 2nd house shapes a relationship to quality and investment pieces over disposable ones.\n"
+    "- The 10th house and Midheaven shape public-facing image instincts.\n"
+    "- The 6th house shapes everyday, practical instincts.\n"
+    "- The dominant element shapes fabric and structure tendencies: Fire leans bold and "
+    "structured, Earth leans grounded and tactile, Water leans fluid and draped, Air leans light "
+    "and layered.\n"
+    "- The dominant modality shapes consistency versus variety: Cardinal leans toward trying new "
+    "things, Fixed toward a reliable, repeated aesthetic, Mutable toward genuinely adapting by "
+    "context.\n\n"
+    "Every color, fabric, and silhouette named still has to be determined fresh from real "
+    "reasoning about this specific chart\u2014never from a list of any kind, including a list of "
+    "colors to avoid; no color or garment type is permanently right or wrong going in. Oxford "
+    "comma in any list of three or more items. No colon-introduced lists, no \"rather than X\" or "
+    "\"instead of X\" contrastive tails\u2014state the actual observation and move on. Never mention "
+    "a bra, underwear, or any other undergarment.\n\n"
+    "Style mode governs the actual shape of the response:\n"
+    "If a style_mode other than gender-neutral is given (feminine, masculine, androgynous, or a "
+    "person's own typed description), write ONE reading reflecting that lean, and return ONLY "
+    "this JSON: {\"reading\": \"<the full reading>\"}.\n"
+    "If style_mode is gender-neutral or absent, no single lean was chosen, so write THREE "
+    "genuinely distinct readings from the exact same chart placements\u2014one for a feminine "
+    "aesthetic lean, one for masculine, one for androgynous. These have to be real, different "
+    "readings that happen to share an underlying chart, not the same content three times with "
+    "different adjectives swapped in\u2014the same placements should suggest genuinely different "
+    "concrete categories of item under each lens. Return ONLY this JSON: {\"feminine\": \"<full "
+    "reading>\", \"masculine\": \"<full reading>\", \"androgynous\": \"<full reading>\"}.\n"
+    "No markdown, no explanation outside the JSON object, in either case."
+)
+
+
+async def generate_style_profile_reading(style_profile, style_mode=None, style_mode_custom_text=None, api_key=None):
+    """
+    A standalone companion to Star Stylist's daily recommendations,
+    not a replacement for them: this is a one-time (or occasionally
+    revisited) read on what someone's chart says about their natural
+    aesthetic tendencies in general, distinct from what to wear for
+    a specific occasion today. Reuses compute_style_profile's exact
+    output -- the same underlying chart data, read through a
+    different, more interpretive lens.
+
+    Returns a dict: {"reading": str} when a real style_mode is given,
+    or {"feminine": str, "masculine": str, "androgynous": str} when
+    none was chosen -- the caller is expected to check which shape
+    came back rather than assume one.
+    """
+    import json as jsonlib, re
+    key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+    if not key:
+        raise RuntimeError("ANTHROPIC_API_KEY not set—can't make a live call")
+
+    user_facts = {"chart_profile": style_profile, "style_mode": style_mode or "gender-neutral"}
+    if style_mode == "custom" and style_mode_custom_text:
+        user_facts["style_mode_description"] = style_mode_custom_text
+
+    payload = jsonlib.dumps({
+        "model": "claude-opus-5",
+        "max_tokens": 2500,
+        "output_config": {"effort": "low"},
+        "system": STYLE_PROFILE_SYSTEM_PROMPT,
+        "messages": [{"role": "user", "content": jsonlib.dumps(user_facts)}],
+    }).encode("utf-8")
+
+    key_terms = [v for v in [
+        style_profile.get("ascendant_sign"), style_profile.get("sun_sign"),
+        style_profile.get("moon_sign"), style_profile.get("venus_sign"), style_profile.get("mars_sign"),
+    ] if v]
+
+    def _is_grounded(parsed):
+        text = " ".join(str(v) for v in parsed.values())
+        if not key_terms:
+            return True
+        matched = [t for t in key_terms if t in text]
+        return len(matched) >= min(2, len(key_terms))
+
+    async def _make_one_call():
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                content=payload,
+                headers={"Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01"},
+            )
+            resp.raise_for_status()
+            body = resp.json()
+        text = "".join(block.get("text", "") for block in body.get("content", []) if block.get("type") == "text").strip()
+        text = re.sub(r"^```(json)?|```$", "", text.strip(), flags=re.MULTILINE).strip()
+        return jsonlib.loads(text)
+
+    parsed = await _make_one_call()
+    if not _is_grounded(parsed):
+        parsed = await _make_one_call()
+    if not _is_grounded(parsed):
+        raise RuntimeError("GROUNDING_CHECK_FAILED_TWICE: " + str(parsed)[:300])
+
+    return {k: _normalize_dashes(v) for k, v in parsed.items()}
 
 
 async def classify_question_multi_lens(question_text, valid_lenses, context_description, target_count=3, api_key=None):

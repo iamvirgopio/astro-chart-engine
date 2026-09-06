@@ -2517,6 +2517,12 @@ async def classify_wardrobe_match(wardrobe_text, occasion_text, occasion_classif
         "genuinely good fit for today, not just technically the right category. A heavy wool coat "
         "logged as outerwear is not a match for a hot, humid errand day, even though it's the only "
         "outerwear logged.\n\n"
+        "Each item also lists when it was last recommended, or that it never has been. When two "
+        "or more items in the same category are genuinely, comparably suitable for today, prefer "
+        "the one used less recently\u2014an item never recommended before wins over one recommended "
+        "yesterday, all else being equal. This is a tiebreaker between real, comparable fits, "
+        "never a reason to pick something that's actually a worse fit just because it's less "
+        "recently used.\n\n"
         "Return ONLY this JSON object, no markdown, no explanation:\n"
         '{"matched_items": {"top": "<id or null>", "dress": "<id or null>", "bottom": "<id or null>", '
         '"outerwear": "<id or null>", "shoes": "<id or null>", "bag": "<id or null>", '

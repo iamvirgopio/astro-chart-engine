@@ -4291,27 +4291,21 @@ async def _cut_commentary(raw_text, api_key=None, model="claude-haiku-4-5-202510
     the condition at its call site)—checked directly rather than
     assumed, since changing this instruction text is otherwise a real
     risk to a caller this function wasn't written with in mind.
-    Sign-name preservation was tightened after a real report: a sign
-    sitting inside a sentence that also explained what the placement
-    meant ("Your Libra Rising means whatever you choose should feel
-    considered and balanced, so...") was getting cut as a whole
-    clause, sign included, rather than having only the meaning-
-    explaining part removed. A first attempt at fixing that used a
-    colon-based worked example ("Your Libra Rising: wear a fitted
-    cream top") to illustrate the split -- but a rewriting model
-    reliably treats a worked example as a template, not an
-    illustration, and applied that exact colon structure to every
-    sign mention in the piece, recreating the original "Hair: /
-    Makeup: /" labeled-list problem this whole pass exists to prevent,
-    just with placement names as the new labels. The instruction below
-    now uses a pure-prose example with no colon, and explicitly
-    forbids repeating a "Placement: detail" pattern more than once.
 
-    model: defaults to Haiku, this pass's original model. Its own
-        call site passes claude-opus-5 specifically when stylist_voice
-        is the caller, for the same reason the main generation call
-        was upgraded for that caller too -- see that parameter's own
-        docstring entry on _blend_ingredients_into_answer.
+    Consolidated after a direct, correct challenge: across several
+    real reports, each new commentary pattern got added here as its
+    own named, quoted example rather than folded into a stronger
+    general principle—by the time of this rewrite, 76 separate quoted
+    phrase examples had piled up in one instruction, the exact
+    "ever-growing list of forbidden phrasings" failure mode already
+    documented and rejected elsewhere in this file for a different
+    problem (color, and the original AI-tell filter). More named
+    examples were making the actual writing worse, not better, and a
+    person using this app noticed the regression before it was caught
+    here. Cut down to a small, deliberately varied set of examples
+    plus one explicit instruction to generalize the pattern to
+    whatever NEW phrasing it takes next, rather than waiting for each
+    variant to be individually named first.
     """
     import os, json as jsonlib, urllib.request
     key = api_key or os.environ.get("ANTHROPIC_API_KEY")
@@ -4323,62 +4317,38 @@ async def _cut_commentary(raw_text, api_key=None, model="claude-haiku-4-5-202510
         "\"your Libra Rising\"). A sign name is a protected fact just like an item or "
         "color\u2014when it appears in a sentence that ALSO explains what the placement means "
         "or wants, cut only the explaining part and fold the sign into the same flowing "
-        "sentence as the instruction, in real prose\u2014never with a colon between them. For "
-        "example, rewrite \"Your Libra Rising means whatever you choose should feel "
-        "considered and balanced, so wear a fitted cream top\" into something like \"Wear a "
-        "fitted cream top\u2014the considered, balanced choice your Libra Rising is drawn to,\" "
-        "not \"Your Libra Rising: wear a fitted cream top.\" The sign survives, folded "
-        "naturally into one sentence, never set off with a colon as its own label. NEVER "
-        "repeat a \"Placement: detail\" or \"Sign: detail\" pattern more than once across the "
-        "whole piece\u2014even a single repetition turns the writing back into a labeled list, "
-        "which is exactly what this pass exists to prevent, just with placement names as the "
-        "labels instead of \"Hair:\" or \"Outfit:\". Cut everything else\u2014specifically, cut "
-        "any clause that explains what an item or placement means, signals, achieves, or how "
-        "it 'reads' to other people, when nothing concrete is attached to it at all. Three "
-        "more real, reported examples of exactly that pattern, still slipping through: "
-        "\"that your Moon in Taurus craves weight you can feel\" attached to a fabric "
-        "description (cut the whole clause, keep just the fabric detail); \"Your Venus in "
-        "Scorpio keeps the whole thing in one dark, rich tone rather than a cheerful "
-        "mismatched set\" (cut down to the actual instruction\u2014\"keep the whole thing in "
-        "one dark, rich tone\"\u2014dropping both the sign-narrates-what-it-does framing and "
-        "the \"rather than\" contrastive tail); \"the coordinated look your Libra Rising "
-        "wants even with no one watching\" attached to a sock instruction (cut the whole "
-        "trailing clause, keep only the sock detail). Two more, still slipping through as of "
-        "the latest report: \"a low white leather sneaker that can handle a wet floor\" (cut "
-        "to just \"a low white leather sneaker\"); \"a black leather-trim crossbody\u2014hands "
-        "free for the touch tank, nothing swinging into glass\" (cut to just \"a black "
-        "leather-trim crossbody\"). Three more, a later real report: \"tan woven leather "
-        "slides\u2014flat, real leather, no break-in\u2014for your Moon in Taurus, since they "
-        "come off in one motion when you find something worth trying\" (cut down to \"tan "
-        "woven leather slides for your Moon in Taurus, since they come off in one "
-        "motion\"\u2014both the redundant descriptor restating what \"leather slides\" already "
-        "means, and the trailing justification clause, are commentary); \"a thin gold chain "
-        "at the neck, nothing else, for your Libra rising\" (cut to \"a thin gold chain at the "
-        "neck, for your Libra rising\"\u2014\"nothing else\" adds no new fact); a wardrobe-gap "
-        "suggestion described with a detail that only matters if it were part of today's "
-        "outfit (\"a straw hat that survives being crushed in a tote\" when nothing about "
-        "carrying a tote today was ever established) gets that detail cut entirely, since a "
-        "future purchase suggestion inventing its own imagined-use-today context is commentary "
-        "same as any other. Also cut any \"instead of X\" contrastive tail the same way "
-        "as a \"rather than\" one (\"to knot at the strap... instead of adding a real jacket\" "
-        "cuts to just the strap instruction), and rewrite a colon introducing a list (\"pick the "
-        "base:\", \"keep everything else quiet:\", \"gets exactly one statement:\") as an "
-        "ordinary sentence, genuinely varied each time rather than one fixed substitute\u2014"
-        "never a colon-led list. Watch "
-        "specifically for a placement "
-        "name followed by what it \"wants,\" \"keeps,\" or \"craves,\" especially paired with "
-        "a \"rather than\" or \"instead of\" contrastive tail\u2014that combination is a strong "
-        "signal of exactly the commentary this pass exists to remove; cut any "
-        "opening sentence that doesn't name a concrete item; cut any closing sentence "
-        "summarizing an overall feeling, presence, or identity instead of naming an item\u2014"
-        "and never replace a cut closing sentence with a bare fragment of tag-words instead "
-        "(\"Cream linens, gold, soft texture.\" is not an acceptable substitute for a deleted "
-        "sentence; a real sentence or nothing, never a noun fragment). If a sentence is "
-        "entirely commentary with no concrete fact and no sign name in it at all, delete the "
-        "whole sentence. Do not add anything new. Do not soften or rephrase the facts that "
-        "stay\u2014only remove what doesn't belong. Oxford comma in any list of three or more "
-        "items this rewrite produces or preserves. Plain text only, no markdown. Return ONLY "
-        "the rewritten text, nothing else\u2014no preamble, no explanation of what you changed."
+        "sentence as the instruction, in real prose\u2014never with a colon between them, and "
+        "never repeated as its own \"Placement: detail\" label more than once across the "
+        "whole piece\u2014even a single repetition turns the writing back into a labeled "
+        "list, the exact thing this pass exists to prevent.\n\n"
+        "The one test for everything else: does this clause add a NEW, different concrete "
+        "fact, or does it restate, qualify, or justify a fact already given? If it's the "
+        "latter, cut it, no matter how it's phrased\u2014a trailing \"since...\" or \"so "
+        "that...\" justification, a qualifier like \"nothing else\" or \"and that's the only "
+        "X,\" a descriptor that just restates what the item's own name already implies "
+        "(calling something already named \"leather slides\" also \"real leather\"), or a "
+        "clause explaining what a placement \"wants,\" \"keeps,\" or \"craves.\" None of these "
+        "add real information; they only dress up a fact that already stood on its own.\n\n"
+        "Two real examples of that same underlying pattern, phrased completely differently "
+        "from each other on purpose: \"keeps the whole thing in one dark, rich tone rather "
+        "than a cheerful mismatched set\" cuts to \"keeps the whole thing in one dark, rich "
+        "tone\"; \"a black leather-trim crossbody\u2014hands free for the touch tank, nothing "
+        "swinging into glass\" cuts to \"a black leather-trim crossbody.\" Whatever new "
+        "phrasing this same pattern takes next, apply the same test to it\u2014don't wait for "
+        "a new variant to be individually named here before treating it as commentary.\n\n"
+        "Also cut any \"instead of X\" or \"rather than X\" contrastive tail the same way, and "
+        "rewrite a colon introducing a list as an ordinary sentence, genuinely varied each "
+        "time, never one fixed substitute. Cut any opening sentence that doesn't name a "
+        "concrete item; cut any closing sentence summarizing an overall feeling, presence, or "
+        "identity instead of naming an item\u2014and never replace a cut closing sentence with "
+        "a bare fragment of tag-words instead (\"Cream linens, gold, soft texture.\" is not an "
+        "acceptable substitute for a deleted sentence; a real sentence or nothing, never a "
+        "noun fragment). If a sentence is entirely commentary with no concrete fact and no "
+        "sign name in it at all, delete the whole sentence. Do not add anything new. Do not "
+        "soften or rephrase the facts that stay\u2014only remove what doesn't belong. Oxford "
+        "comma in any list of three or more items this rewrite produces or preserves. Plain "
+        "text only, no markdown. Return ONLY the rewritten text, nothing else\u2014no "
+        "preamble, no explanation of what you changed."
     )
     payload_dict = {
         "model": model,

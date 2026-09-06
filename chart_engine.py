@@ -1328,10 +1328,33 @@ async def _blend_ingredients_into_answer(ingredients, task_instruction, question
     def _is_grounded(text):
         return _check_grounding(text, key_terms, stylist_voice)
 
+    # A prompt instruction alone has now failed twice on this exact
+    # rule (once as the original narrower "no colon-led list" wording,
+    # again after being made more explicit)—a real, reported case of
+    # an instruction being correctly present in the deployed prompt
+    # but not reliably followed, confirmed by checking the actual
+    # delivered file directly rather than assuming. Colons are
+    # different from the AI-tell filter removed above: that filter
+    # mechanically edited already-generated text and broke grammar
+    # doing it. This never touches the text itself—it only decides
+    # whether to ask for a fresh attempt, the same proven mechanism
+    # already used for grounding, so any retry is a genuine rewrite by
+    # the model, not a mechanical edit. A colon directly between two
+    # digits (a time, "3:00") is deliberately exempted, though none of
+    # this app's readings currently use clock times.
+    def _has_bad_colon(text):
+        import re as _colon_re
+        return bool(_colon_re.search(r'(?<!\d):(?!\d)', text))
+
     raw_text = await _make_one_call()
-    if not _is_grounded(raw_text):
-        print(f"[blend] response didn't reference any real ingredient content, retrying once. First attempt: {raw_text[:200]}")
+    retried = False
+    if not _is_grounded(raw_text) or _has_bad_colon(raw_text):
+        if not _is_grounded(raw_text):
+            print(f"[blend] response didn't reference any real ingredient content, retrying once. First attempt: {raw_text[:200]}")
+        else:
+            print(f"[blend] response used a colon the voice rule disallows, retrying once. First attempt: {raw_text[:200]}")
         raw_text = await _make_one_call()
+        retried = True
     if not _is_grounded(raw_text):
         print(f"[blend] still ungrounded after retry, raising for caller to handle. Retry attempt: {raw_text[:200]}")
         # Deliberately unmistakable rather than a plain exception message
@@ -1342,6 +1365,14 @@ async def _blend_ingredients_into_answer(ingredients, task_instruction, question
         # that the grounding check is correctly catching a repeatedly-
         # ungrounded response rather than letting it through unchanged.
         raise RuntimeError("GROUNDING_CHECK_FAILED_TWICE: " + raw_text[:300])
+    if retried and _has_bad_colon(raw_text):
+        # Deliberately not a hard failure the way grounding is—a
+        # remaining colon after one genuine retry is a real, minor
+        # imperfection, not a reason to withhold an otherwise good,
+        # correctly-grounded reading entirely. Logged so this is
+        # actually visible and trackable rather than silently
+        # tolerated forever.
+        print(f"[blend] colon still present after retry, accepting anyway: {raw_text[:200]}")
 
     # The regex-based AI-tell filter that used to live here—stripping
     # specific banned words and phrases after the fact—is gone.

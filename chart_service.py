@@ -743,6 +743,24 @@ async def get_style_recommendation(req: StyleRecommendationRequest):
             wardrobe_missing_categories=wardrobe_match["missing_categories"] if wardrobe_match else None,
             api_key=None,
         )
+
+        if wardrobe_match and wardrobe_match["matched_items"]:
+            # Best-effort, deliberately non-blocking: a real
+            # recommendation the person can actually use is the thing
+            # that matters here, and a failure updating recency data
+            # is never a reason to fail the whole request over.
+            try:
+                from supabase import create_client
+                from datetime import datetime, timezone
+                supabase_admin = create_client(
+                    os.environ.get("SUPABASE_URL", ""), os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+                )
+                matched_ids = list(wardrobe_match["matched_items"].values())
+                supabase_admin.table("wardrobe_items").update(
+                    {"last_recommended_at": datetime.now(timezone.utc).isoformat()}
+                ).in_("id", matched_ids).execute()
+            except Exception as e:
+                print(f"[style-recommendation] couldn't update wardrobe recency, non-fatal: {type(e).__name__}: {e}")
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"message": message}

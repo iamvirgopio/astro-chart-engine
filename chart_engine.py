@@ -1103,7 +1103,14 @@ async def _blend_ingredients_into_answer(ingredients, task_instruction, question
             "rhetorical question is fine when a moment genuinely earns it, not as a filler tic "
             "reached for automatically. Fold the real fact into the sentence that explains it, "
             "instead of stating the fact and then unpacking it separately afterward. No closing "
-            "line summarizing what was just said\u2014end on the actual point, not a recap.\n\n"
+            "line summarizing what was just said\u2014end on the actual point, not a recap. No "
+            "colon anywhere unless it's introducing a genuinely formatted list\u2014never to "
+            "introduce a clause or a run of comma-separated examples in the middle of a "
+            "sentence. A real, reported case: \"apply that directly to how the business "
+            "operates: audit your delivery, tighten your processes, cut what doesn't serve the "
+            "core offer\" should never have that colon at all\u2014rewrite it as a real sentence "
+            "instead (\"...operates, so audit your delivery, tighten your processes, and cut "
+            "what doesn't serve the core offer\").\n\n"
             if interpretive else
             "Voice: say what needs to be said. Nothing more. Every sentence states real, "
             "concrete facts—an item, a color, a fit, a function. Before adding anything past "
@@ -1117,6 +1124,10 @@ async def _blend_ingredients_into_answer(ingredients, task_instruction, question
             "that reads as a list wearing sentence-shaped punctuation, not an actual reading. "
             "Related facts belong in the same sentence, joined the way a person would really say "
             "them out loud, not stacked one after another.\n\n"
+            "No colon anywhere unless it's introducing a genuinely formatted list—never to "
+            "introduce a clause or a run of comma-separated examples in the middle of a "
+            "sentence. Rewrite that as a real sentence joined with \"so,\" \"and,\" or a comma "
+            "instead.\n\n"
             "Concrete means SPECIFIC, not brief—cutting commentary is not license to cut detail. "
             "Name the actual garment (a slip dress, leather leggings, a tailored blazer), the actual "
             "color (oxblood, not just 'dark red'), the actual technique or product type. 'Deep, "
@@ -2382,7 +2393,9 @@ STYLE_RECOMMENDATION_SYSTEM_PROMPT = (
     "- Never mention a bra, underwear, or any other undergarment, no matter what fit preferences "
     "are set, unless the occasion itself genuinely involves lingerie, an intimate context, or a "
     "honeymoon.\n"
-    "- No colon introducing a list (\"gets one thing:\", \"keep it quiet:\")\u2014rewrite as an "
+    "- No colon anywhere unless it's introducing a genuinely formatted list\u2014never to "
+    "introduce a clause, an elaboration, or a run of comma-separated examples in the middle of "
+    "a sentence (\"gets one thing:\", \"keep it quiet:\")\u2014rewrite as an "
     "ordinary sentence, genuinely varied each time. No \"rather than X\" or \"instead of X\" "
     "contrastive tail on an instruction\u2014state the actual choice and stop, don't also name what "
     "was rejected.\n\n"
@@ -2696,145 +2709,6 @@ async def generate_style_recommendation(
     if not _is_grounded(cleaned):
         cleaned = raw_text
     return _normalize_dashes(cleaned)
-
-
-# Star Stylist's system prompt is deliberately silent about WHY a
-# placement means what it means -- that's correct for a daily,
-# decided-not-suggested outfit call. This is a genuinely different
-# use case: a one-time, standalone read on someone's own natural
-# aesthetic tendencies, in the same self-understanding spirit as the
-# rest of this app's readings. Here, explaining the real reasoning
-# behind an observation IS the point, not something to avoid.
-STYLE_PROFILE_SYSTEM_PROMPT = (
-    "You are helping someone understand their own natural aesthetic language, based on their "
-    "real chart placements\u2014not a daily outfit call, a genuine, standalone read on what "
-    "colors, silhouettes, textures, and overall energy they're naturally drawn to, and why.\n\n"
-    "Address them directly as \"you\" throughout. Name the real placement each observation is "
-    "grounded in\u2014their Ascendant, Venus, Moon, Mars, the houses given, their dominant element, "
-    "their dominant modality\u2014and here, unlike a daily outfit reading, explain the real "
-    "reasoning behind each observation; that's the actual value of this reading, not something to "
-    "cut.\n\n"
-    "How the chart actually shapes aesthetic language, as real reasoning to draw from:\n"
-    "- Ascendant and Venus together set the default aesthetic language: overall silhouette and "
-    "color sensibility.\n"
-    "- Moon shapes comfort instincts: fabric weight, texture, what actually feels safe to wear.\n"
-    "- Mars shapes boldness: how much of a statement versus how restrained someone naturally "
-    "leans.\n"
-    "- The 2nd house shapes a relationship to quality and investment pieces over disposable ones.\n"
-    "- The 10th house and Midheaven shape public-facing image instincts.\n"
-    "- The 6th house shapes everyday, practical instincts.\n"
-    "- The dominant element shapes fabric and structure tendencies: Fire leans bold and "
-    "structured, Earth leans grounded and tactile, Water leans fluid and draped, Air leans light "
-    "and layered.\n"
-    "- The dominant modality shapes consistency versus variety: Cardinal leans toward trying new "
-    "things, Fixed toward a reliable, repeated aesthetic, Mutable toward genuinely adapting by "
-    "context.\n\n"
-    "Every color, fabric, and silhouette named still has to be determined fresh from real "
-    "reasoning about this specific chart\u2014never from a list of any kind, including a list of "
-    "colors to avoid; no color or garment type is permanently right or wrong going in. Oxford "
-    "comma in any list of three or more items. No colon-introduced lists, no \"rather than X\" or "
-    "\"instead of X\" contrastive tails\u2014state the actual observation and move on. Never mention "
-    "a bra, underwear, or any other undergarment.\n\n"
-    "Write one genuine reading reflecting the aesthetic lean given (feminine, masculine, "
-    "androgynous, or a person's own typed description). Return ONLY this JSON, no markdown, no "
-    "explanation outside it: {\"reading\": \"<the full reading>\"}."
-)
-
-
-async def _generate_one_style_profile_lens(style_profile, lens, lens_custom_text, key):
-    """
-    One single reading, one specific lens\u2014the real fix for a
-    reported timeout, not a bigger version of the same call. Asking
-    one request to produce three full readings at once made it a
-    meaningfully heavier generation than anything else in this file,
-    and widening its timeout once already failed to actually resolve
-    that. Three of these, run concurrently via asyncio.gather rather
-    than sequentially, cost roughly the wall-clock time of the
-    slowest single one instead of the sum of three\u2014the same order
-    of latency as any other single Star Stylist-style call, which has
-    never had this problem.
-    """
-    import json as jsonlib, re
-    user_facts = {"chart_profile": style_profile, "style_mode": lens}
-    if lens == "custom" and lens_custom_text:
-        user_facts["style_mode_description"] = lens_custom_text
-
-    payload = jsonlib.dumps({
-        "model": "claude-opus-5",
-        "max_tokens": 1800,
-        "output_config": {"effort": "low"},
-        "system": STYLE_PROFILE_SYSTEM_PROMPT,
-        "messages": [{"role": "user", "content": jsonlib.dumps(user_facts)}],
-    }).encode("utf-8")
-
-    key_terms = [v for v in [
-        style_profile.get("ascendant_sign"), style_profile.get("sun_sign"),
-        style_profile.get("moon_sign"), style_profile.get("venus_sign"), style_profile.get("mars_sign"),
-    ] if v]
-
-    def _is_grounded(text):
-        if not key_terms:
-            return True
-        matched = [t for t in key_terms if t in text]
-        return len(matched) >= min(2, len(key_terms))
-
-    async def _make_one_call():
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(
-                "https://api.anthropic.com/v1/messages",
-                content=payload,
-                headers={"Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01"},
-            )
-            resp.raise_for_status()
-            body = resp.json()
-        text = "".join(block.get("text", "") for block in body.get("content", []) if block.get("type") == "text").strip()
-        text = re.sub(r"^```(json)?|```$", "", text.strip(), flags=re.MULTILINE).strip()
-        parsed = jsonlib.loads(text)
-        return parsed.get("reading", "")
-
-    reading = await _make_one_call()
-    if not _is_grounded(reading):
-        reading = await _make_one_call()
-    if not _is_grounded(reading):
-        raise RuntimeError("GROUNDING_CHECK_FAILED_TWICE: " + reading[:300])
-    return _normalize_dashes(reading)
-
-
-async def generate_style_profile_reading(style_profile, style_mode=None, style_mode_custom_text=None, api_key=None):
-    """
-    A standalone companion to Star Stylist's daily recommendations,
-    not a replacement for them: this is a one-time (or occasionally
-    revisited) read on what someone's chart says about their natural
-    aesthetic tendencies in general, distinct from what to wear for
-    a specific occasion today. Reuses compute_style_profile's exact
-    output -- the same underlying chart data, read through a
-    different, more interpretive lens.
-
-    Returns a dict: {"reading": str} when a real style_mode is given,
-    or {"feminine": str, "masculine": str, "androgynous": str} when
-    none was chosen -- the caller is expected to check which shape
-    came back rather than assume one. The three-lens case runs all
-    three as separate, concurrent calls (see
-    _generate_one_style_profile_lens's own docstring for why), not one
-    call asked to produce all three -- if any single lens still fails
-    even after its own retry, the whole request fails rather than
-    silently returning two readings and a blank one, since that would
-    be a confusing, half-finished result to show.
-    """
-    key = api_key or os.environ.get("ANTHROPIC_API_KEY")
-    if not key:
-        raise RuntimeError("ANTHROPIC_API_KEY not set—can't make a live call")
-
-    if style_mode and style_mode != "gender-neutral":
-        reading = await _generate_one_style_profile_lens(style_profile, style_mode, style_mode_custom_text, key)
-        return {"reading": reading}
-
-    feminine, masculine, androgynous = await asyncio.gather(
-        _generate_one_style_profile_lens(style_profile, "feminine", None, key),
-        _generate_one_style_profile_lens(style_profile, "masculine", None, key),
-        _generate_one_style_profile_lens(style_profile, "androgynous", None, key),
-    )
-    return {"feminine": feminine, "masculine": masculine, "androgynous": androgynous}
 
 
 async def classify_question_multi_lens(question_text, valid_lenses, context_description, target_count=3, api_key=None):

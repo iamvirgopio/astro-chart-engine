@@ -1118,7 +1118,17 @@ async def _blend_ingredients_into_answer(ingredients, task_instruction, question
             "instance of the same underlying problem as reaching for the same color or the same "
             "closing phrase every time: whatever image or word choice comes to mind first for "
             "this general idea, treat that as a reason to reach for something else, genuinely "
-            "thought through for this specific reading rather than recalled out of habit.\n\n"
+            "thought through for this specific reading rather than recalled out of habit. A "
+            "real, measured failure specific to readings covering many placements (a "
+            "progressions or solar return reading covering a dozen or more): 14 of roughly 16 "
+            "paragraphs in one actual reading all opened with the identical formula, \"[the "
+            "placement] in [sign] means/is [explanation]\"\u2014every single paragraph "
+            "announcing itself the same way, which reads as a mechanical list wearing "
+            "paragraph breaks no matter how good the sentences inside each one are. Genuinely "
+            "vary how each placement gets introduced\u2014lead with the real-life situation "
+            "sometimes, the tension or theme other times, the placement itself only "
+            "occasionally\u2014the same way no two paragraphs in something an actual person "
+            "wrote would ever announce themselves identically fourteen times in a row.\n\n"
             if interpretive else
             "Voice: this is one specific person's own voice, not a generic assistant's—"
             "confident and direct in a way that never hedges or qualifies itself. Say what "
@@ -1359,9 +1369,24 @@ async def _blend_ingredients_into_answer(ingredients, task_instruction, question
         import re as _colon_re
         return bool(_colon_re.search(r'(?<!\d):(?!\d)', text))
 
+    # A real, reported latency regression, not a hypothetical: a
+    # separate, additional retry budget stacked on top of grounding's
+    # own retry pushed the worst case from 2 sequential calls to 4,
+    # and that's the direct, identified cause of Crystals failing
+    # outright and Progressions/Solar Return taking long enough to
+    # seem broken -- almost certainly a serverless timeout somewhere
+    # in the chain being exceeded by the extra round trips. Reverted
+    # to one shared retry for either problem, capped at 2 calls total.
+    # The real, primary fix for colons is the ingredient-text change
+    # at every call site (removing the colon from the model's own
+    # input); this check is a light backup, not a heavy enforcement
+    # mechanism worth trading real latency for.
     raw_text = await _make_one_call()
-    if not _is_grounded(raw_text):
-        print(f"[blend] response didn't reference any real ingredient content, retrying once. First attempt: {raw_text[:200]}")
+    if not _is_grounded(raw_text) or _has_bad_colon(raw_text):
+        if not _is_grounded(raw_text):
+            print(f"[blend] response didn't reference any real ingredient content, retrying once. First attempt: {raw_text[:200]}")
+        else:
+            print(f"[blend] response used a colon the voice rule disallows, retrying once. First attempt: {raw_text[:200]}")
         raw_text = await _make_one_call()
     if not _is_grounded(raw_text):
         print(f"[blend] still ungrounded after retry, raising for caller to handle. Retry attempt: {raw_text[:200]}")
@@ -1373,30 +1398,14 @@ async def _blend_ingredients_into_answer(ingredients, task_instruction, question
         # that the grounding check is correctly catching a repeatedly-
         # ungrounded response rather than letting it through unchanged.
         raise RuntimeError("GROUNDING_CHECK_FAILED_TWICE: " + raw_text[:300])
-
-    # Two retries here, not one -- a real, reported case of a colon
-    # surviving a single retry, traced to a genuine, identifiable
-    # cause rather than plain model randomness: the ingredient text
-    # itself, built on the frontend, used a colon as its own label/
-    # meaning separator ("Card Name: meaning text") in nearly every
-    # feature across the app, every single call, giving the model a
-    # colon-shaped pattern in its own input to plausibly mirror right
-    # before being told not to use one. That separator has been
-    # changed to a period at every call site as the real, primary fix.
-    # This extra retry budget is the backup for whatever the input fix
-    # doesn't fully catch, not the first line of defense.
-    for _ in range(2):
-        if not _has_bad_colon(raw_text):
-            break
-        print(f"[blend] response used a colon the voice rule disallows, retrying. Attempt: {raw_text[:200]}")
-        raw_text = await _make_one_call()
     if _has_bad_colon(raw_text):
         # Deliberately not a hard failure the way grounding is—a
-        # colon surviving three real attempts is a genuine, minor
+        # colon surviving the one shared retry is a genuine, minor
         # imperfection, not a reason to withhold an otherwise good,
-        # correctly-grounded reading entirely. Logged so this stays
+        # correctly-grounded reading entirely, or to spend a third
+        # sequential call chasing punctuation. Logged so this stays
         # visible and trackable rather than silently tolerated.
-        print(f"[blend] colon still present after two retries, accepting anyway: {raw_text[:200]}")
+        print(f"[blend] colon still present after retry, accepting anyway: {raw_text[:200]}")
 
     # The regex-based AI-tell filter that used to live here—stripping
     # specific banned words and phrases after the fact—is gone.

@@ -740,11 +740,38 @@ async def get_style_recommendation(req: StyleRecommendationRequest):
             body_preferences_text=req.body_preferences_text,
             wardrobe_items=req.wardrobe_items,
             wardrobe_match=wardrobe_match["matched_items"] if wardrobe_match else None,
+            wardrobe_missing_categories=wardrobe_match["missing_categories"] if wardrobe_match else None,
             api_key=None,
         )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"message": message}
+
+
+class StyleProfileRequest(BaseModel):
+    natal_chart: dict
+    style_mode: str | None = None
+    style_mode_custom_text: str | None = None
+
+
+@app.post("/style-profile")
+async def get_style_profile(req: StyleProfileRequest):
+    """
+    Standalone companion to /style-recommendation: a one-time (or
+    occasionally revisited) read on someone's chart-derived aesthetic
+    tendencies, not a daily outfit call. Reuses the same
+    compute_style_profile as Star Stylist itself, so both features
+    stay consistent with each other rather than maintaining two
+    separate ideas of what a person's chart says about their style.
+    """
+    try:
+        style_profile = ce.compute_style_profile(req.natal_chart)
+        result = await ce.generate_style_profile_reading(
+            style_profile, style_mode=req.style_mode, style_mode_custom_text=req.style_mode_custom_text, api_key=None,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return result
 
 
 @app.post("/classify-question")

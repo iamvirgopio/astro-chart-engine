@@ -119,7 +119,7 @@ def get_chart(req: ChartRequest):
     except Exception as e:
         # Bad coordinates, resolver failures, etc. surface as a clean 400
         # instead of a raw stack trace reaching the frontend.
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}" if str(e) else type(e).__name__)
     return result
 
 
@@ -159,7 +159,7 @@ def get_progressions(req: ProgressionsRequest):
     except KeyError:
         raise HTTPException(status_code=400, detail="natal_chart is missing julian_day_ut—pass the full computed chart, not just positions")
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}" if str(e) else type(e).__name__)
     return result
 
 
@@ -177,7 +177,7 @@ def get_solar_return(req: SolarReturnRequest):
         chart["exact_moment_utc"] = ce.jd_to_iso_utc(sr_jd)
         return chart
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}" if str(e) else type(e).__name__)
 
 
 @app.get("/health")
@@ -210,7 +210,7 @@ async def get_reading(req: ReadingRequest):
             req.start_year, req.start_month, req.start_day, req.num_days,
         )
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}" if str(e) else type(e).__name__)
     return result
 
 
@@ -289,7 +289,7 @@ def get_today_transits(req: TransitsForDateRequest):
         # crystal pairing from ever coming up completely empty.
         reading["transiting_moon_sign"] = target_positions["Moon"]["sign"]
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}" if str(e) else type(e).__name__)
     return reading
 
 
@@ -428,7 +428,7 @@ async def get_year_ahead(req: YearAheadRequest):
         )
         return {"message": message, "themes": top_hits}
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}" if str(e) else type(e).__name__)
 
 
 @app.get("/moon-phases")
@@ -490,7 +490,7 @@ async def get_vibe_of_day(req: VibeOfDayRequest):
             today_positions=today_positions, angle_data=house_system_data,
         )
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}" if str(e) else type(e).__name__)
     return reading
 
 
@@ -512,7 +512,7 @@ def get_astrocartography(req: AstrocartographyRequest):
         lines = ce.compute_astrocartography_lines(req.julian_day_ut)
         hits = ce.check_location_influence(lines, query_lat=req.query_lat, query_lon=req.query_lon, orb_degrees=req.orb_degrees)
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}" if str(e) else type(e).__name__)
     return {"hits": hits}
 
 
@@ -531,7 +531,7 @@ def get_astrocartography_lines(req: AstrocartographyLinesRequest):
     try:
         lines = ce.compute_astrocartography_lines(req.julian_day_ut)
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}" if str(e) else type(e).__name__)
     return {"lines": lines}
 
 
@@ -566,7 +566,7 @@ def get_planetary_hours(req: PlanetaryHoursRequest):
     try:
         result = ce.compute_planetary_hours(req.year, req.month, req.day, req.lat, req.lon)
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}" if str(e) else type(e).__name__)
     return result
 
 
@@ -581,7 +581,7 @@ def get_calendar_range(req: CalendarRangeRequest):
             num_days=req.num_days, natal_positions=req.natal_positions, natal_houses=req.natal_houses,
         )
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}" if str(e) else type(e).__name__)
     return result
 
 
@@ -591,7 +591,7 @@ def get_synastry(req: SynastryRequest):
     try:
         hits = ce.compute_synastry(req.chart_a_positions, req.chart_b_positions, label_a=req.label_a, label_b=req.label_b)
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}" if str(e) else type(e).__name__)
     return {"hits": hits}
 
 
@@ -620,7 +620,7 @@ async def classify_question_multi_endpoint(req: ClassifyQuestionMultiRequest):
             context_description=req.context_description, target_count=req.target_count,
         )
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}" if str(e) else type(e).__name__)
     return result
 
 
@@ -665,7 +665,7 @@ async def get_blended_answer(req: BlendAnswerRequest):
         ingredient_tuples = [(item[0], item[1]) for item in req.ingredients]
         message = await ce.blend_answer(ingredient_tuples, req.question, detailed=req.detailed, allow_web_search=req.allow_web_search, interpretive=req.interpretive, sentence_range_override=req.sentence_range_override, stylist_voice=req.stylist_voice)
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}" if str(e) else type(e).__name__)
     return {"message": message}
 
 
@@ -762,7 +762,7 @@ async def get_style_recommendation(req: StyleRecommendationRequest):
             except Exception as e:
                 print(f"[style-recommendation] couldn't update wardrobe recency, non-fatal: {type(e).__name__}: {e}")
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}" if str(e) else type(e).__name__)
     return {"message": message}
 
 
@@ -788,7 +788,7 @@ async def get_style_profile(req: StyleProfileRequest):
             style_profile, style_mode=req.style_mode, style_mode_custom_text=req.style_mode_custom_text, api_key=None,
         )
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}" if str(e) else type(e).__name__)
     return result
 
 
@@ -803,7 +803,7 @@ async def classify_question_endpoint(req: ClassifyQuestionRequest):
             context_description=req.context_description,
         )
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}" if str(e) else type(e).__name__)
     return result
 
 
@@ -825,5 +825,5 @@ def get_recommended_locations(req: RecommendLocationsRequest):
             theme_lines=req.theme_lines, top_n=req.top_n, orb_degrees=req.orb_degrees,
         )
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}" if str(e) else type(e).__name__)
     return {"results": results}

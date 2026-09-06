@@ -12,6 +12,7 @@ import swisseph as swe
 import math
 import os
 import httpx
+import asyncio
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from timezonefinder import TimezoneFinder
@@ -2723,19 +2724,69 @@ STYLE_PROFILE_SYSTEM_PROMPT = (
     "comma in any list of three or more items. No colon-introduced lists, no \"rather than X\" or "
     "\"instead of X\" contrastive tails\u2014state the actual observation and move on. Never mention "
     "a bra, underwear, or any other undergarment.\n\n"
-    "Style mode governs the actual shape of the response:\n"
-    "If a style_mode other than gender-neutral is given (feminine, masculine, androgynous, or a "
-    "person's own typed description), write ONE reading reflecting that lean, and return ONLY "
-    "this JSON: {\"reading\": \"<the full reading>\"}.\n"
-    "If style_mode is gender-neutral or absent, no single lean was chosen, so write THREE "
-    "genuinely distinct readings from the exact same chart placements\u2014one for a feminine "
-    "aesthetic lean, one for masculine, one for androgynous. These have to be real, different "
-    "readings that happen to share an underlying chart, not the same content three times with "
-    "different adjectives swapped in\u2014the same placements should suggest genuinely different "
-    "concrete categories of item under each lens. Return ONLY this JSON: {\"feminine\": \"<full "
-    "reading>\", \"masculine\": \"<full reading>\", \"androgynous\": \"<full reading>\"}.\n"
-    "No markdown, no explanation outside the JSON object, in either case."
+    "Write one genuine reading reflecting the aesthetic lean given (feminine, masculine, "
+    "androgynous, or a person's own typed description). Return ONLY this JSON, no markdown, no "
+    "explanation outside it: {\"reading\": \"<the full reading>\"}."
 )
+
+
+async def _generate_one_style_profile_lens(style_profile, lens, lens_custom_text, key):
+    """
+    One single reading, one specific lens\u2014the real fix for a
+    reported timeout, not a bigger version of the same call. Asking
+    one request to produce three full readings at once made it a
+    meaningfully heavier generation than anything else in this file,
+    and widening its timeout once already failed to actually resolve
+    that. Three of these, run concurrently via asyncio.gather rather
+    than sequentially, cost roughly the wall-clock time of the
+    slowest single one instead of the sum of three\u2014the same order
+    of latency as any other single Star Stylist-style call, which has
+    never had this problem.
+    """
+    import json as jsonlib, re
+    user_facts = {"chart_profile": style_profile, "style_mode": lens}
+    if lens == "custom" and lens_custom_text:
+        user_facts["style_mode_description"] = lens_custom_text
+
+    payload = jsonlib.dumps({
+        "model": "claude-opus-5",
+        "max_tokens": 1800,
+        "output_config": {"effort": "low"},
+        "system": STYLE_PROFILE_SYSTEM_PROMPT,
+        "messages": [{"role": "user", "content": jsonlib.dumps(user_facts)}],
+    }).encode("utf-8")
+
+    key_terms = [v for v in [
+        style_profile.get("ascendant_sign"), style_profile.get("sun_sign"),
+        style_profile.get("moon_sign"), style_profile.get("venus_sign"), style_profile.get("mars_sign"),
+    ] if v]
+
+    def _is_grounded(text):
+        if not key_terms:
+            return True
+        matched = [t for t in key_terms if t in text]
+        return len(matched) >= min(2, len(key_terms))
+
+    async def _make_one_call():
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                content=payload,
+                headers={"Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01"},
+            )
+            resp.raise_for_status()
+            body = resp.json()
+        text = "".join(block.get("text", "") for block in body.get("content", []) if block.get("type") == "text").strip()
+        text = re.sub(r"^```(json)?|```$", "", text.strip(), flags=re.MULTILINE).strip()
+        parsed = jsonlib.loads(text)
+        return parsed.get("reading", "")
+
+    reading = await _make_one_call()
+    if not _is_grounded(reading):
+        reading = await _make_one_call()
+    if not _is_grounded(reading):
+        raise RuntimeError("GROUNDING_CHECK_FAILED_TWICE: " + reading[:300])
+    return _normalize_dashes(reading)
 
 
 async def generate_style_profile_reading(style_profile, style_mode=None, style_mode_custom_text=None, api_key=None):
@@ -2751,74 +2802,28 @@ async def generate_style_profile_reading(style_profile, style_mode=None, style_m
     Returns a dict: {"reading": str} when a real style_mode is given,
     or {"feminine": str, "masculine": str, "androgynous": str} when
     none was chosen -- the caller is expected to check which shape
-    came back rather than assume one.
+    came back rather than assume one. The three-lens case runs all
+    three as separate, concurrent calls (see
+    _generate_one_style_profile_lens's own docstring for why), not one
+    call asked to produce all three -- if any single lens still fails
+    even after its own retry, the whole request fails rather than
+    silently returning two readings and a blank one, since that would
+    be a confusing, half-finished result to show.
     """
-    import json as jsonlib, re
     key = api_key or os.environ.get("ANTHROPIC_API_KEY")
     if not key:
         raise RuntimeError("ANTHROPIC_API_KEY not set—can't make a live call")
 
-    user_facts = {"chart_profile": style_profile, "style_mode": style_mode or "gender-neutral"}
-    if style_mode == "custom" and style_mode_custom_text:
-        user_facts["style_mode_description"] = style_mode_custom_text
+    if style_mode and style_mode != "gender-neutral":
+        reading = await _generate_one_style_profile_lens(style_profile, style_mode, style_mode_custom_text, key)
+        return {"reading": reading}
 
-    payload = jsonlib.dumps({
-        "model": "claude-opus-5",
-        # Real fix, not the original sizing: the three-reading case
-        # (no style_mode set) has to produce three full, substantive
-        # readings in one response, not one -- meaningfully larger
-        # than what 2500 tokens was originally sized for, especially
-        # with Opus's own thinking overhead counting against the same
-        # budget. Sized up for the actual worst case, not the common
-        # one.
-        "max_tokens": 4500,
-        "output_config": {"effort": "low"},
-        "system": STYLE_PROFILE_SYSTEM_PROMPT,
-        "messages": [{"role": "user", "content": jsonlib.dumps(user_facts)}],
-    }).encode("utf-8")
-
-    key_terms = [v for v in [
-        style_profile.get("ascendant_sign"), style_profile.get("sun_sign"),
-        style_profile.get("moon_sign"), style_profile.get("venus_sign"), style_profile.get("mars_sign"),
-    ] if v]
-
-    def _is_grounded(parsed):
-        text = " ".join(str(v) for v in parsed.values())
-        if not key_terms:
-            return True
-        matched = [t for t in key_terms if t in text]
-        return len(matched) >= min(2, len(key_terms))
-
-    async def _make_one_call():
-        # Real, reported failure: a 20-second timeout was too tight
-        # for the three-reading case specifically, and httpx raises
-        # its timeout with no message at all in that situation --
-        # str(e) on it is a genuinely empty string, which is exactly
-        # what surfaced as an opaque {"detail": ""} with nothing to
-        # debug from. Widened here to match the larger worst case;
-        # the exception handling below no longer depends on the
-        # message alone either, so this specific failure mode can't
-        # repeat silently even if some other call is still too slow
-        # someday.
-        async with httpx.AsyncClient(timeout=45) as client:
-            resp = await client.post(
-                "https://api.anthropic.com/v1/messages",
-                content=payload,
-                headers={"Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01"},
-            )
-            resp.raise_for_status()
-            body = resp.json()
-        text = "".join(block.get("text", "") for block in body.get("content", []) if block.get("type") == "text").strip()
-        text = re.sub(r"^```(json)?|```$", "", text.strip(), flags=re.MULTILINE).strip()
-        return jsonlib.loads(text)
-
-    parsed = await _make_one_call()
-    if not _is_grounded(parsed):
-        parsed = await _make_one_call()
-    if not _is_grounded(parsed):
-        raise RuntimeError("GROUNDING_CHECK_FAILED_TWICE: " + str(parsed)[:300])
-
-    return {k: _normalize_dashes(v) for k, v in parsed.items()}
+    feminine, masculine, androgynous = await asyncio.gather(
+        _generate_one_style_profile_lens(style_profile, "feminine", None, key),
+        _generate_one_style_profile_lens(style_profile, "masculine", None, key),
+        _generate_one_style_profile_lens(style_profile, "androgynous", None, key),
+    )
+    return {"feminine": feminine, "masculine": masculine, "androgynous": androgynous}
 
 
 async def classify_question_multi_lens(question_text, valid_lenses, context_description, target_count=3, api_key=None):

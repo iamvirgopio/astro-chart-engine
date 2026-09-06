@@ -1270,7 +1270,16 @@ async def _blend_ingredients_into_answer(ingredients, task_instruction, question
         # the thread while genuinely waiting on the network, which is
         # the actual fix, not just a smaller version of the same
         # problem.
-        async with httpx.AsyncClient(timeout=30 if allow_web_search else 15) as client:
+        #
+        # Real, reported failure, not the original sizing: Progressions
+        # now sends up to 19 real placements as ingredients (this
+        # session's own earlier expansion from a smaller original set),
+        # and Year Ahead can send a full 12 months of individual
+        # transits -- both meaningfully larger synthesis tasks than 15
+        # seconds was sized for. Widened for the genuine current worst
+        # case across every caller of this shared function, not just
+        # the one that happened to get reported first.
+        async with httpx.AsyncClient(timeout=45 if allow_web_search else 35) as client:
             resp = await client.post(
                 "https://api.anthropic.com/v1/messages",
                 content=payload,

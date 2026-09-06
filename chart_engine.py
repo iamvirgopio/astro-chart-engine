@@ -2764,7 +2764,14 @@ async def generate_style_profile_reading(style_profile, style_mode=None, style_m
 
     payload = jsonlib.dumps({
         "model": "claude-opus-5",
-        "max_tokens": 2500,
+        # Real fix, not the original sizing: the three-reading case
+        # (no style_mode set) has to produce three full, substantive
+        # readings in one response, not one -- meaningfully larger
+        # than what 2500 tokens was originally sized for, especially
+        # with Opus's own thinking overhead counting against the same
+        # budget. Sized up for the actual worst case, not the common
+        # one.
+        "max_tokens": 4500,
         "output_config": {"effort": "low"},
         "system": STYLE_PROFILE_SYSTEM_PROMPT,
         "messages": [{"role": "user", "content": jsonlib.dumps(user_facts)}],
@@ -2783,7 +2790,17 @@ async def generate_style_profile_reading(style_profile, style_mode=None, style_m
         return len(matched) >= min(2, len(key_terms))
 
     async def _make_one_call():
-        async with httpx.AsyncClient(timeout=20) as client:
+        # Real, reported failure: a 20-second timeout was too tight
+        # for the three-reading case specifically, and httpx raises
+        # its timeout with no message at all in that situation --
+        # str(e) on it is a genuinely empty string, which is exactly
+        # what surfaced as an opaque {"detail": ""} with nothing to
+        # debug from. Widened here to match the larger worst case;
+        # the exception handling below no longer depends on the
+        # message alone either, so this specific failure mode can't
+        # repeat silently even if some other call is still too slow
+        # someday.
+        async with httpx.AsyncClient(timeout=45) as client:
             resp = await client.post(
                 "https://api.anthropic.com/v1/messages",
                 content=payload,

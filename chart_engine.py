@@ -1287,7 +1287,22 @@ async def _blend_ingredients_into_answer(ingredients, task_instruction, question
         payload_dict["tools"] = [{"type": "web_search_20250305", "name": "web_search"}]
     payload = jsonlib.dumps(payload_dict).encode("utf-8")
 
-    async def _make_one_call():
+    async def _make_one_call(retry_note=None):
+        # retry_note, when given, replaces the bare "Write the
+        # reading." user message with a pointed correction instead of
+        # a blind re-roll -- telling the model specifically what its
+        # last attempt did wrong raises the odds this one shared retry
+        # actually succeeds, rather than just hoping a second random
+        # draw happens to avoid the same habit. Only ever used for the
+        # colon retry specifically; grounding failures still get a
+        # plain re-roll, since "you didn't use the real ingredients"
+        # is better addressed by trying fresh than by referencing a
+        # failed attempt that had nothing real to build on anyway.
+        call_payload = payload
+        if retry_note:
+            retry_payload_dict = dict(payload_dict)
+            retry_payload_dict["messages"] = [{"role": "user", "content": f"Write the reading. {retry_note}"}]
+            call_payload = jsonlib.dumps(retry_payload_dict).encode("utf-8")
         # httpx.AsyncClient, not urllib -- urllib.request.urlopen blocks
         # the calling thread for its entire duration, and on a
         # synchronous FastAPI endpoint, that thread comes from a shared,
@@ -1310,7 +1325,7 @@ async def _blend_ingredients_into_answer(ingredients, task_instruction, question
         async with httpx.AsyncClient(timeout=45 if allow_web_search else 35) as client:
             resp = await client.post(
                 "https://api.anthropic.com/v1/messages",
-                content=payload,
+                content=call_payload,
                 headers={"Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01"},
             )
             resp.raise_for_status()
@@ -1390,9 +1405,15 @@ async def _blend_ingredients_into_answer(ingredients, task_instruction, question
     if not _is_grounded(raw_text) or _has_bad_colon(raw_text):
         if not _is_grounded(raw_text):
             print(f"[blend] response didn't reference any real ingredient content, retrying once. First attempt: {raw_text[:200]}")
+            raw_text = await _make_one_call()
         else:
-            print(f"[blend] response used a colon the voice rule disallows, retrying once. First attempt: {raw_text[:200]}")
-        raw_text = await _make_one_call()
+            print(f"[blend] response used a colon the voice rule disallows, retrying once with targeted feedback. First attempt: {raw_text[:200]}")
+            raw_text = await _make_one_call(
+                retry_note="Your last attempt used a colon partway through the sentence to introduce "
+                           "an explanation or a list of examples. Rewrite it as a real sentence joined "
+                           "with \"so,\" \"and,\" or a comma instead—no colon anywhere this time unless "
+                           "it's a genuinely formatted list."
+            )
     if not _is_grounded(raw_text):
         print(f"[blend] still ungrounded after retry, raising for caller to handle. Retry attempt: {raw_text[:200]}")
         # Deliberately unmistakable rather than a plain exception message
@@ -4330,7 +4351,8 @@ async def _cut_commentary(raw_text, api_key=None, model="claude-haiku-4-5-202510
         "sentence; a real sentence or nothing, never a noun fragment). If a sentence is "
         "entirely commentary with no concrete fact and no sign name in it at all, delete the "
         "whole sentence. Do not add anything new. Do not soften or rephrase the facts that "
-        "stay\u2014only remove what doesn't belong. Plain text only, no markdown. Return ONLY "
+        "stay\u2014only remove what doesn't belong. Oxford comma in any list of three or more "
+        "items this rewrite produces or preserves. Plain text only, no markdown. Return ONLY "
         "the rewritten text, nothing else\u2014no preamble, no explanation of what you changed."
     )
     payload_dict = {

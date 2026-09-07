@@ -221,7 +221,7 @@ def send_daily(x_cron_secret: str | None = Header(None, alias="X-Cron-Secret")):
     phase_today = ce.moon_phase(jd_today)["phase"]
     phase_yesterday = ce.moon_phase(jd_yesterday)["phase"]
     if phase_today != phase_yesterday:
-        global_events["moon_phase"] = f"It's a {phase_today} today."
+        global_events["moon_phase"] = f"{phase_today} today—worth knowing before you make any big moves."
 
     positions_today = ce.compute_positions(jd_today)
     positions_yesterday = ce.compute_positions(jd_yesterday)
@@ -234,11 +234,11 @@ def send_daily(x_cron_secret: str | None = Header(None, alias="X-Cron-Secret")):
             # if it ever happens, the later one simply overwrites --
             # acceptable, since missing a same-day second retrograde
             # notice is a minor loss, not a real bug.
-            global_events["retrograde"] = f"{planet} turns retrograde today."
+            global_events["retrograde"] = f"{planet} just went retrograde. Buckle up."
 
     eclipses_today = ce.find_eclipses_in_range(jd_today - 0.5, jd_today + 0.5)
     if eclipses_today:
-        global_events["eclipse"] = f"Today's a {eclipses_today[0]['type']} eclipse."
+        global_events["eclipse"] = f"Today's a {eclipses_today[0]['type']} eclipse, and eclipses don't do subtle."
 
     # --- Housekeeping: revert any expired comped period back to
     # genuinely 'free' status. A comped period (no real Stripe
@@ -289,9 +289,9 @@ def send_daily(x_cron_secret: str | None = Header(None, alias="X-Cron-Secret")):
             # whether it did anything, since changing its return value
             # would also affect the referral reward path that calls it.
             if user_row.data.get("subscription_status") == "lifetime":
-                birthday_messages[user_id] = "Happy birthday!"
+                birthday_messages[user_id] = "Happy birthday. Go do something that actually feels like you."
             else:
-                birthday_messages[user_id] = "Happy birthday! We added a free month to your account as a gift."
+                birthday_messages[user_id] = "Happy birthday! We snuck a free month onto your account. Enjoy."
         except Exception as e:
             print(f"[push] couldn't grant birthday gift for user {user_id}: {e}")
 
@@ -329,15 +329,15 @@ def send_daily(x_cron_secret: str | None = Header(None, alias="X-Cron-Secret")):
                         hit = _find_personal_hits(chart_row.data["computed_data"]["positions"], positions_today)
                         if hit:
                             if hit["is_return"]:
-                                personal_line = f"Your {hit['transiting']} Return is happening right now."
+                                personal_line = f"Your {hit['transiting']} Return is happening right now—bigger deal than it sounds."
                             else:
-                                personal_line = f"Transiting {hit['transiting']} is forming a tight {hit['aspect']} to your natal {hit['natal']} today."
+                                personal_line = f"Transiting {hit['transiting']} is in a tight {hit['aspect']} with your natal {hit['natal']} today. Pay attention."
                     if prefs.get("progressions", True):
                         birth_jd_ut = chart_row.data["computed_data"].get("julian_day_ut")
                         if birth_jd_ut:
                             prog_hit = _check_progression_sign_change(birth_jd_ut, jd_today, jd_yesterday)
                             if prog_hit:
-                                progression_line = f"Your progressed {prog_hit['planet']} just moved into {prog_hit['sign']}."
+                                progression_line = f"Your progressed {prog_hit['planet']} just moved into {prog_hit['sign']}—a real shift most people never even notice happening."
             except Exception as e:
                 print(f"[push] couldn't check personal transits or progressions for user {user_id}: {e}")
 

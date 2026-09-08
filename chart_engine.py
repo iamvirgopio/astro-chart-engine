@@ -1519,8 +1519,11 @@ async def _blend_vibe_ingredients(ingredients, api_key=None):
     # This wrapper bypasses blend_answer entirely, so it needs its own
     # copy of the same dash normalization—without this, Vibe of Day
     # specifically would keep showing the model's own " -- " habit even
-    # after every other caller was fixed.
-    return _normalize_dashes(result)
+    # after every other caller was fixed. Same reasoning now applies to
+    # paragraph breaks -- this was the specific surface confirmed to
+    # have zero breaks despite the prompt asking for them, so it needs
+    # its own copy of the enforcement too, for the same bypass reason.
+    return _enforce_paragraph_breaks(_normalize_dashes(result))
 
 
 ANGLE_MEANING = {
@@ -4489,6 +4492,48 @@ def _normalize_dashes(text):
     return text
 
 
+def _enforce_paragraph_breaks(text):
+    """Applied to every live model generation, same reasoning as
+    _normalize_dashes just above -- a real, reported case (an Ask
+    reading, one dense unbroken paragraph start to finish) confirmed
+    that simply asking for paragraph breaks in the prompt isn't
+    reliable enough on its own, the same way asking for a real em dash
+    instead of " -- " wasn't. The instruction stays in the prompt
+    (it's still the right ask, and often enough the model already does
+    this correctly on its own -- see the early-exit below), but this
+    is what actually guarantees it lands for the cases where the model
+    doesn't.
+
+    Every 2-3 sentences for longer/more complex ones, every 4-5 for
+    shorter ones -- gauged by average word count across the whole
+    text, not per-sentence, since a single short sentence in an
+    otherwise-long-sentence reading shouldn't flip the grouping size
+    mid-stream.
+    """
+    import re
+    if re.search(r"\n\s*\n", text):
+        # Model already broke it into paragraphs on its own -- leave
+        # real, deliberate breaks alone rather than re-chunking
+        # something that's already correct.
+        return text
+
+    sentences = re.split(r"(?<=[.!?])\s+(?=[A-Z\"\u2018\u2019])", text.strip())
+    sentences = [s for s in sentences if s.strip()]
+    if len(sentences) <= 3:
+        # Short enough that it reads fine as one paragraph regardless
+        # of the rule below -- forcing a break into a 2-3 sentence
+        # reading would just look arbitrary, not genuinely helpful.
+        return text
+
+    avg_words = sum(len(s.split()) for s in sentences) / len(sentences)
+    group_size = 2 if avg_words >= 22 else 3 if avg_words >= 14 else 4 if avg_words >= 8 else 5
+
+    paragraphs = []
+    for i in range(0, len(sentences), group_size):
+        paragraphs.append(" ".join(sentences[i:i + group_size]))
+    return "\n\n".join(paragraphs)
+
+
 async def blend_answer(ingredients, question_text, api_key=None, detailed=False, allow_web_search=False, interpretive=False, sentence_range_override=None, stylist_voice=False):
     """
     Generic blending entry point for surfaces where the real content
@@ -4663,6 +4708,16 @@ async def blend_answer(ingredients, question_text, api_key=None, detailed=False,
     # gets a real em dash with no surrounding spaces, regardless of
     # what the model actually generated.
     result = _normalize_dashes(result)
+    # Same reasoning as the dash normalization directly above -- a
+    # prompt instruction alone wasn't reliable enough to guarantee
+    # paragraph breaks either (confirmed directly: a real, reported Ask
+    # reading came back as one dense, unbroken paragraph despite the
+    # prompt asking for breaks every 2-3/4-5 sentences). This is what
+    # actually guarantees every caller through this one function gets
+    # them, regardless of whether the model's own generation already
+    # included real breaks or not -- the function itself leaves
+    # genuinely-already-broken text untouched rather than re-chunking it.
+    result = _enforce_paragraph_breaks(result)
     return result
 
 

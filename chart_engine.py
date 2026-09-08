@@ -978,18 +978,33 @@ async def _blend_ingredients_into_answer(ingredients, task_instruction, question
     bullet_list = "\n".join(f"- {text}" for _, text in ingredients)
     question_block = f'They asked: "{question_context}"\n\n' if question_context else ""
 
+    # Paragraph-break rule, applied consistently across all three voices
+    # below -- previously only the interpretive branch broke into
+    # paragraphs at all, and only at theme boundaries. The default
+    # branch explicitly said "ONE short, cohesive paragraph," which is
+    # exactly why Vibe of Day (which calls this without interpretive)
+    # had zero breaks and read as one dense wall of text -- a real,
+    # reported problem, not a generation inconsistency. This is a
+    # sentence-count rule instead, independent of theme, so it applies
+    # even to a single-theme reading that would otherwise stay one
+    # unbroken block regardless of voice.
+    paragraph_rule = (
+        "Break your response into short paragraphs as you write, so the reader's eyes get "
+        "a regular rest rather than facing one dense, unbroken wall of text: roughly every "
+        "2-3 sentences if they're longer or more complex, or every 4-5 if they're shorter. "
+        "Use an actual blank line between paragraphs (a genuine empty line, not just a line "
+        "break). This applies throughout the whole response, not only at shifts between "
+        "distinct time periods or themes."
+    )
     opening_instruction = (
         f"You write {sentence_range} sentences of real, structured prose {task_instruction}, "
-        "based ONLY on the real astrological observations given below.\n\n"
+        "based ONLY on the real astrological observations given below. " + paragraph_rule + "\n\n"
         if stylist_voice else
         f"You write {sentence_range} sentences of real, structured prose {task_instruction}, "
-        "based ONLY on the real astrological observations given below. Break it into short "
-        "paragraphs—one per distinct time period or theme—separated by a blank line "
-        "(an actual empty line between them, not just a line break), so a longer reading is "
-        "genuinely readable rather than one dense, unbroken wall of text.\n\n"
+        "based ONLY on the real astrological observations given below. " + paragraph_rule + "\n\n"
         if interpretive else
-        f"You write ONE short, cohesive paragraph ({sentence_range} sentences) {task_instruction}, "
-        "based ONLY on the real astrological observations given below.\n\n"
+        f"You write {sentence_range} sentences {task_instruction}, "
+        "based ONLY on the real astrological observations given below. " + paragraph_rule + "\n\n"
     )
     system_prompt = (
         opening_instruction +

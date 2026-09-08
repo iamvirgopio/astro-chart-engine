@@ -890,7 +890,7 @@ SHARED_VOICE_CORE = (
 )
 
 
-async def _blend_ingredients_into_answer(ingredients, task_instruction, question_context=None, api_key=None, sentence_range="2-5", max_tokens=300, allow_web_search=False, interpretive=False, stylist_voice=False, model="claude-haiku-4-5-20251001"):
+async def _blend_ingredients_into_answer(ingredients, task_instruction, question_context=None, api_key=None, sentence_range="2-5", max_tokens=600, allow_web_search=False, interpretive=False, stylist_voice=False, model="claude-haiku-4-5-20251001"):
     """
     THE single shared blending function for every question-answering
     surface in the app—vibe of day, the main reading engine, synastry
@@ -910,7 +910,14 @@ async def _blend_ingredients_into_answer(ingredients, task_instruction, question
         detailed output covering hair, makeup, outfit, and accessories)
         need real room to actually be detailed—override both together
         so the length instruction and the token ceiling stay consistent
-        with each other.
+        with each other. max_tokens' own default raised from 300 to
+        600 after a real, reported case (an Ask reading about grief,
+        genuinely long and multi-paragraph) got cut off mid-sentence at
+        the old ceiling—the nominal "2-5 sentence" default suggests a
+        short answer, but a genuinely weighty question can reasonably
+        need more room regardless of that nominal target, and this was
+        tighter than what these readings actually need in practice, not
+        just in this one instance.
     allow_web_search: opt-in, real web_search tool access—the model is
         told to rely on its own knowledge first and only search when a
         specific place is mentioned that it genuinely isn't confident

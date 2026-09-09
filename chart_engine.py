@@ -1416,6 +1416,20 @@ async def _blend_ingredients_into_answer(ingredients, task_instruction, question
         import re as _re
         text = _re.sub(r'\*{1,2}([^*\n]+?)\*{1,2}', r'\1', text)
         text = _re.sub(r'(?<!\w)_{1,2}([^_\n]+?)_{1,2}(?!\w)', r'\1', text)
+        # Deterministic backup for a real, reported leak: a confused
+        # meta-comment about a "previous attempt" it was told about
+        # but never actually saw (the retry_note bug this was paired
+        # with a prompt fix for, above) showed up verbatim in a
+        # delivered reading, ending in "Here's your reading:" right
+        # before the real content started. The prompt fix should
+        # prevent the confusion itself, but this catches the leak
+        # pattern regardless of what causes it going forward -- if
+        # the model ever prefaces the real content with commentary
+        # ending in a "here's ___:" handoff phrase, only what comes
+        # after is kept.
+        _handoff = _re.search(r"(?:here'?s?\s+(?:your|the)\s+reading|here you go)\s*:?\s*\n+", text, _re.IGNORECASE)
+        if _handoff:
+            text = text[_handoff.end():].strip()
         return text
 
     # Real terms actually present in the given ingredients (planet and
@@ -1474,10 +1488,23 @@ async def _blend_ingredients_into_answer(ingredients, task_instruction, question
         else:
             print(f"[blend] response used a colon the voice rule disallows, retrying once with targeted feedback. First attempt: {raw_text[:200]}")
             raw_text = await _make_one_call(
-                retry_note="Your last attempt used a colon partway through the sentence to introduce "
-                           "an explanation or a list of examples. Rewrite it as a real sentence joined "
-                           "with \"so,\" \"and,\" or a comma instead—no colon anywhere this time unless "
-                           "it's a genuinely formatted list."
+                # Never phrase this as "your last attempt" or "rewrite
+                # it" -- confirmed as a real, reported failure mode,
+                # not a hypothetical: this retry is sent as a single,
+                # fresh user message with no prior assistant turn
+                # included (see _make_one_call above), so the model
+                # has no actual attempt in its context to reference.
+                # Telling it "your last attempt did X, rewrite it"
+                # describes a turn it never saw, and it reasonably
+                # responded by narrating that confusion ("I don't have
+                # a previous attempt to rewrite...") directly into the
+                # displayed reading before writing the actual content
+                # anyway. Phrased as a standalone rule instead, with no
+                # reference to a prior turn at all.
+                retry_note="Do this without using a colon to introduce an explanation "
+                           "or a list of examples anywhere in it. Join that kind of thought with "
+                           "\"so,\" \"and,\" or a comma instead\u2014no colon anywhere unless it's a "
+                           "genuinely formatted list."
             )
     if not _is_grounded(raw_text):
         print(f"[blend] still ungrounded after retry, raising for caller to handle. Retry attempt: {raw_text[:200]}")

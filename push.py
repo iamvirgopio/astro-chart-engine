@@ -204,6 +204,12 @@ def send_event_reminders(x_cron_secret: str | None = Header(None, alias="X-Cron-
     ).eq("remind_me", True).eq("reminder_sent", False).execute()
     rows = pending.data or []
     if not rows:
+        # Printed on every run, not just when something's actually due
+        # -- a real, reported problem this is fixing directly: this
+        # endpoint returning 200 OK told Milli nothing about whether it
+        # actually found anything, only that the request didn't crash.
+        # Visible in Railway's own logs now, no separate check needed.
+        print("[push] send-event-reminders: no reminders currently pending at all (remind_me=true, reminder_sent=false)")
         return {"checked": 0, "sent": 0}
 
     # Each user's own timezone, fetched once in a batch rather than
@@ -231,6 +237,18 @@ def send_event_reminders(x_cron_secret: str | None = Header(None, alias="X-Cron-
             event_local = datetime.combine(event_date, event_time, tzinfo=tz)
             event_utc = event_local.astimezone(dt_timezone.utc)
             reminder_moment = event_utc - timedelta(minutes=row["reminder_offset_minutes"] or 0)
+            # Printed for every pending row, due or not -- this is the
+            # actual, direct answer to "why hasn't my reminder fired,"
+            # visible in Railway's logs without needing cron-job.org at
+            # all: the exact UTC instants this run computed for the
+            # event and its reminder, against the exact UTC instant
+            # this run considers "now." If the event's own time zone
+            # was somehow wrong (a stale preferred_timezone, or none
+            # ever set for a guest-created event), it shows up here as
+            # an event_utc that's obviously off from what was actually
+            # intended, rather than silently never firing with no
+            # visible reason why.
+            print(f"[push] event {row['id']} ({row['title']}): event_utc={event_utc.isoformat()}, reminder_moment={reminder_moment.isoformat()}, now={now_utc.isoformat()}")
         except Exception as e:
             print(f"[push] couldn't compute reminder time for event {row['id']}: {e}")
             continue
@@ -249,6 +267,7 @@ def send_event_reminders(x_cron_secret: str | None = Header(None, alias="X-Cron-
             due_rows.append(row)
 
     if not due_rows:
+        print(f"[push] send-event-reminders: {len(rows)} pending reminder(s) found, none due yet -- see the per-event timing lines above for exactly why")
         return {"checked": len(rows), "sent": 0}
 
     subs = _supabase_admin.table("push_subscriptions").select(
@@ -279,7 +298,19 @@ def send_event_reminders(x_cron_secret: str | None = Header(None, alias="X-Cron-
     for row in due_rows:
         offset_desc = _describe_offset(row["reminder_offset_minutes"] or 0)
         message = f"{row['title']} tomorrow" if offset_desc == "tomorrow" else f"{row['title']} {offset_desc}"
-        for sub in subs_by_user.get(row["user_id"], []):
+        user_subs = subs_by_user.get(row["user_id"], [])
+        if not user_subs:
+            # A due reminder with genuinely nowhere to send it -- most
+            # likely notifications were never turned on for this
+            # account, or the one subscription that existed expired
+            # and was already cleaned up by _send_to_device elsewhere.
+            # Printed specifically, not folded into the generic "sent"
+            # count, since "0 sent because nothing was due" and "0 sent
+            # because it was due but no device to reach" are different
+            # problems needing different fixes.
+            print(f"[push] event {row['id']} ({row['title']}) is due but user {row['user_id']} has no active push subscription")
+            continue
+        for sub in user_subs:
             if _send_to_device(sub, "Estrella", message, "/calendar"):
                 sent += 1
 

@@ -23,6 +23,8 @@
 # step is yours to do—it can't be configured from here.
 
 import os
+import time
+import httpx
 from fastapi import APIRouter, HTTPException, Header
 from pydantic import BaseModel
 from pywebpush import webpush, WebPushException
@@ -32,6 +34,30 @@ import chart_engine as ce
 import billing
 
 router = APIRouter()
+
+
+def _with_retry(fn, max_attempts: int = 3, base_delay: float = 0.5):
+    """Retries a Supabase/postgrest call on a transient connection-level
+    failure -- a real, reported crash this fixes directly: a pooled
+    HTTP/2 connection to Supabase can go stale between requests and
+    fail outright on its next use, which is a normal, occasional thing
+    that can happen calling any external API, not a sign anything was
+    logically wrong with the query itself. Only retries genuine
+    connection-level errors (a dropped/stale connection, a timeout) --
+    a real error from Supabase itself (bad query, auth failure) still
+    raises immediately on the first attempt, since retrying that would
+    just fail the same way three times instead of once, uselessly
+    delaying an error that retrying can never fix.
+    """
+    last_error: Exception | None = None
+    for attempt in range(max_attempts):
+        try:
+            return fn()
+        except (httpx.RemoteProtocolError, httpx.ConnectError, httpx.ReadTimeout, httpx.ConnectTimeout) as e:
+            last_error = e
+            if attempt < max_attempts - 1:
+                time.sleep(base_delay * (attempt + 1))
+    raise last_error
 
 _VAPID_PRIVATE_KEY = os.environ.get("VAPID_PRIVATE_KEY", "")
 _VAPID_CLAIMS = {"sub": f"mailto:{os.environ.get('VAPID_CONTACT_EMAIL', '')}"}
@@ -199,9 +225,9 @@ def send_event_reminders(x_cron_secret: str | None = Header(None, alias="X-Cron-
     # index on (remind_me, reminder_sent) in the schema keeps this
     # fast regardless of how large calendar_events grows overall,
     # since it was built exactly for this query.
-    pending = _supabase_admin.table("calendar_events").select(
+    pending = _with_retry(lambda: _supabase_admin.table("calendar_events").select(
         "id, user_id, event_date, event_time, title, reminder_offset_minutes"
-    ).eq("remind_me", True).eq("reminder_sent", False).execute()
+    ).eq("remind_me", True).eq("reminder_sent", False).execute())
     rows = pending.data or []
     if not rows:
         # Printed on every run, not just when something's actually due
@@ -217,7 +243,7 @@ def send_event_reminders(x_cron_secret: str | None = Header(None, alias="X-Cron-
     # batch above. Defaults to UTC for anyone whose row doesn't have
     # one set yet, matching the frontend's own fallback.
     user_ids = list({r["user_id"] for r in rows})
-    tz_rows = _supabase_admin.table("users").select("id, preferred_timezone").in_("id", user_ids).execute()
+    tz_rows = _with_retry(lambda: _supabase_admin.table("users").select("id, preferred_timezone").in_("id", user_ids).execute())
     tz_by_user = {row["id"]: (row.get("preferred_timezone") or "UTC") for row in (tz_rows.data or [])}
 
     due_ids: list[str] = []
@@ -270,9 +296,9 @@ def send_event_reminders(x_cron_secret: str | None = Header(None, alias="X-Cron-
         print(f"[push] send-event-reminders: {len(rows)} pending reminder(s) found, none due yet -- see the per-event timing lines above for exactly why")
         return {"checked": len(rows), "sent": 0}
 
-    subs = _supabase_admin.table("push_subscriptions").select(
+    subs = _with_retry(lambda: _supabase_admin.table("push_subscriptions").select(
         "id, user_id, endpoint, p256dh, auth_key"
-    ).in_("user_id", list({r["user_id"] for r in due_rows})).execute()
+    ).in_("user_id", list({r["user_id"] for r in due_rows})).execute())
     subs_by_user: dict[str, list[dict]] = {}
     for sub in subs.data or []:
         subs_by_user.setdefault(sub["user_id"], []).append(sub)
@@ -322,7 +348,7 @@ def send_event_reminders(x_cron_secret: str | None = Header(None, alias="X-Cron-
     # moment already passed once, and re-checking it indefinitely
     # would just be wasted work with no different outcome next time.
     for event_id in due_ids:
-        _supabase_admin.table("calendar_events").update({"reminder_sent": True}).eq("id", event_id).execute()
+        _with_retry(lambda eid=event_id: _supabase_admin.table("calendar_events").update({"reminder_sent": True}).eq("id", eid).execute())
 
     return {"checked": len(rows), "due": len(due_rows), "sent": sent}
 

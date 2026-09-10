@@ -164,7 +164,137 @@ def _find_personal_hits(natal_positions: dict, transiting_positions: dict) -> di
     return best
 
 
-@router.post("/push/send-daily")
+@router.post("/push/send-event-reminders")
+def send_event_reminders(x_cron_secret: str | None = Header(None, alias="X-Cron-Secret")):
+    """Checks for calendar event reminders that are due right now and
+    sends them. Unlike send_daily above, which only needs to run once
+    a day, this needs to be called frequently -- every 5 to 15
+    minutes -- since a reminder set for "30 minutes before" is only
+    useful if this actually notices within a similar window, not once
+    a day. This is a genuinely separate cron job from the one already
+    calling send_daily, not a replacement for it -- both need to keep
+    running, on their own separate schedules.
+
+    Protected by the same shared-secret pattern as send_daily, for the
+    same reason: configure your scheduler to send CRON_SECRET as this
+    header too.
+
+    Real, working per-occurrence tracking, not a guess: reminder_sent
+    is checked and then set on the specific row that fired, so a
+    recurring event's ten different future occurrences each get their
+    own independent reminder, and a reminder already sent is never
+    sent twice even if this runs again a few minutes later and the
+    row hasn't cleared the query window yet.
+    """
+    expected_secret = os.environ.get("CRON_SECRET")
+    if expected_secret and x_cron_secret != expected_secret:
+        raise HTTPException(status_code=401, detail="Invalid or missing cron secret")
+
+    from datetime import datetime, timedelta, timezone as dt_timezone
+    from zoneinfo import ZoneInfo
+
+    now_utc = datetime.now(dt_timezone.utc)
+
+    # Only ever pending reminders in the first place -- the partial
+    # index on (remind_me, reminder_sent) in the schema keeps this
+    # fast regardless of how large calendar_events grows overall,
+    # since it was built exactly for this query.
+    pending = _supabase_admin.table("calendar_events").select(
+        "id, user_id, event_date, event_time, title, reminder_offset_minutes"
+    ).eq("remind_me", True).eq("reminder_sent", False).execute()
+    rows = pending.data or []
+    if not rows:
+        return {"checked": 0, "sent": 0}
+
+    # Each user's own timezone, fetched once in a batch rather than
+    # once per row -- same reasoning as send_daily's own preferences
+    # batch above. Defaults to UTC for anyone whose row doesn't have
+    # one set yet, matching the frontend's own fallback.
+    user_ids = list({r["user_id"] for r in rows})
+    tz_rows = _supabase_admin.table("users").select("id, preferred_timezone").in_("id", user_ids).execute()
+    tz_by_user = {row["id"]: (row.get("preferred_timezone") or "UTC") for row in (tz_rows.data or [])}
+
+    due_ids: list[str] = []
+    due_rows: list[dict] = []
+    for row in rows:
+        if not row.get("event_time"):
+            # A time is required in the UI before a reminder can be
+            # saved in the first place -- this is a defensive check
+            # for a row that somehow has one unset anyway (a manual
+            # DB edit, a future bug elsewhere), not a path expected to
+            # ever actually run.
+            continue
+        try:
+            tz = ZoneInfo(tz_by_user.get(row["user_id"], "UTC"))
+            event_date = datetime.strptime(row["event_date"], "%Y-%m-%d").date()
+            event_time = datetime.strptime(row["event_time"][:5], "%H:%M").time()
+            event_local = datetime.combine(event_date, event_time, tzinfo=tz)
+            event_utc = event_local.astimezone(dt_timezone.utc)
+            reminder_moment = event_utc - timedelta(minutes=row["reminder_offset_minutes"] or 0)
+        except Exception as e:
+            print(f"[push] couldn't compute reminder time for event {row['id']}: {e}")
+            continue
+
+        # Fires once the reminder moment has arrived, but only within
+        # a bounded window after the event itself -- a real, deliberate
+        # guard, not an arbitrary number: without this, a cron outage
+        # of a few hours (or longer) would come back and fire every
+        # single reminder that piled up while it was down, including
+        # ones for events that already happened. Two hours past the
+        # event's own time is long enough to absorb a normal short
+        # outage without ever surfacing a reminder for something
+        # that's already over and gone.
+        if reminder_moment <= now_utc <= event_utc + timedelta(hours=2):
+            due_ids.append(row["id"])
+            due_rows.append(row)
+
+    if not due_rows:
+        return {"checked": len(rows), "sent": 0}
+
+    subs = _supabase_admin.table("push_subscriptions").select(
+        "id, user_id, endpoint, p256dh, auth_key"
+    ).in_("user_id", list({r["user_id"] for r in due_rows})).execute()
+    subs_by_user: dict[str, list[dict]] = {}
+    for sub in subs.data or []:
+        subs_by_user.setdefault(sub["user_id"], []).append(sub)
+
+    def _describe_offset(minutes: int) -> str:
+        # Natural phrasing for the common presets, not a raw number of
+        # minutes shown back to the person -- "tomorrow" and "in an
+        # hour" read like something a person would actually say;
+        # "in 1440 minutes" doesn't. Falls back to plain minutes for
+        # anything that doesn't land on a clean unit, which only
+        # happens for a genuinely unusual custom value.
+        if minutes == 1440:
+            return "tomorrow"
+        if minutes % 1440 == 0:
+            days = minutes // 1440
+            return f"in {days} day{'s' if days != 1 else ''}"
+        if minutes % 60 == 0:
+            hours = minutes // 60
+            return f"in {hours} hour{'s' if hours != 1 else ''}"
+        return f"in {minutes} minutes"
+
+    sent = 0
+    for row in due_rows:
+        offset_desc = _describe_offset(row["reminder_offset_minutes"] or 0)
+        message = f"{row['title']} tomorrow" if offset_desc == "tomorrow" else f"{row['title']} {offset_desc}"
+        for sub in subs_by_user.get(row["user_id"], []):
+            if _send_to_device(sub, "Estrella", message, "/calendar"):
+                sent += 1
+
+    # Marked sent regardless of whether a push subscription actually
+    # existed to receive it -- someone with reminders configured but
+    # no active push subscription (notifications turned off at the OS
+    # level, no subscription ever created) shouldn't have this row
+    # checked again on every single run forever; the reminder's
+    # moment already passed once, and re-checking it indefinitely
+    # would just be wasted work with no different outcome next time.
+    for event_id in due_ids:
+        _supabase_admin.table("calendar_events").update({"reminder_sent": True}).eq("id", event_id).execute()
+
+    return {"checked": len(rows), "due": len(due_rows), "sent": sent}
+
 def send_daily(x_cron_secret: str | None = Header(None, alias="X-Cron-Secret")):
     """The real, comprehensive daily check—not just moon phases.
     Covers, every day:

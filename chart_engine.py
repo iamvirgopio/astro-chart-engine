@@ -45,6 +45,26 @@ PLANETS = {
     "Black Moon Lilith": swe.MEAN_APOG,
     "Ceres": swe.CERES, "Pallas": swe.PALLAS, "Juno": swe.JUNO, "Vesta": swe.VESTA,
     "Pholus": swe.PHOLUS,
+    # Eight named asteroids added at Milli's request. Child, Haumea,
+    # Ate, and Massalia were all deliberately excluded after research
+    # turned up a real problem with each: Child and Massalia are named
+    # for a person's surname and a city respectively, with no
+    # mythological or symbolic basis to interpret; Haumea is a distant,
+    # only-recently-discovered dwarf planet without a main-belt
+    # asteroid's orbital precision; Ate has vivid mythology but no
+    # established astrological interpretation found to draw from.
+    # Every catalog number below verified directly against its actual
+    # minor planet record before being used here, not assumed from the
+    # name: Massalia and Ate removed after the numbers were already
+    # verified, so their entries are simply gone, not left in unused.
+    "Pandora": swe.AST_OFFSET + 55,
+    "Euterpe": swe.AST_OFFSET + 27,
+    "Urania": swe.AST_OFFSET + 30,
+    "Kassandra": swe.AST_OFFSET + 114,
+    "Bacchus": swe.AST_OFFSET + 2063,
+    "Midas": swe.AST_OFFSET + 1981,
+    "Asclepius": swe.AST_OFFSET + 4581,
+    "Casanova": swe.AST_OFFSET + 7328,
     # Eris and Sedna are NOT included here—they require their own
     # object-specific ephemeris files (s136199s.se1, se90377s.se1) that
     # aren't sourced yet. Adding them later is a matter of downloading
